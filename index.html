@@ -2621,10 +2621,25 @@ h1, h2, h3, h4, h5, h6 {
       return await res.json();
     } catch(err) {
       console.warn("Backend API call warning:", err);
-      throw err;
     }
   }
   window.callBackendApi = callBackendApi;
+
+  async function syncRecordToBackend(action, recordData) {
+    try {
+      const orgCode = getActiveOrgCode();
+      const res = await callBackendApi(action, { orgCode: orgCode, data: recordData });
+      if (res && res.success) {
+        console.log(`✅ [${action}] Synced with Google Sheets database:`, res);
+        return res;
+      } else {
+        console.warn(`Sync notice for ${action}:`, res);
+      }
+    } catch(err) {
+      console.warn(`Background sync error for ${action}:`, err.message);
+    }
+  }
+  window.syncRecordToBackend = syncRecordToBackend;
 
   function updateAuthenticatedProfileUI() {
     if (!state.currentUser) return;
@@ -3206,7 +3221,7 @@ h1, h2, h3, h4, h5, h6 {
     const newV = {
       Visit_ID: "VIS-" + now.getFullYear() + "-" + String(state.visits.length + 1).padStart(3, '0') + "-" + Math.floor(100 + Math.random() * 900),
       Date: today,
-      User_ID: state.currentUser.User_ID,
+      User_ID: state.currentUser ? state.currentUser.User_ID : "USR-102",
       Client_ID: clientId,
       Purpose: purpose,
       Check_In_Time: timeStr,
@@ -3216,6 +3231,7 @@ h1, h2, h3, h4, h5, h6 {
       Outcome_Status: "ACTIVE",
       Notes: notes,
       Attachment: imgPreview,
+      _checkInTimestamp: now.getTime(),
       _syncStatus: "synced"
     };
 
@@ -3225,11 +3241,36 @@ h1, h2, h3, h4, h5, h6 {
     closeModal();
     renderView(state.currentView);
     showToast(`Checked-in at ${getClientName(clientId)}!`, "success");
+
+    // Asynchronously sync with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_visit', newV);
+    }
   }
 
   function openCheckOutModal(visitId) {
     const visit = state.visits.find(v => v.Visit_ID === visitId);
     if (!visit) return;
+
+    const now = new Date();
+    let elapsedMins = 1;
+    if (visit._checkInTimestamp) {
+      elapsedMins = Math.max(1, Math.round((now.getTime() - visit._checkInTimestamp) / 60000));
+    } else if (visit.Check_In_Time) {
+      try {
+        const match = visit.Check_In_Time.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+        if (match) {
+          let h = parseInt(match[1], 10);
+          const m = parseInt(match[2], 10);
+          const ap = (match[3] || '').toUpperCase();
+          if (ap === 'PM' && h < 12) h += 12;
+          if (ap === 'AM' && h === 12) h = 0;
+          const inDate = new Date();
+          inDate.setHours(h, m, 0, 0);
+          elapsedMins = Math.max(1, Math.round((now.getTime() - inDate.getTime()) / 60000));
+        }
+      } catch(e) {}
+    }
 
     const modal = document.getElementById("modal-container");
     modal.innerHTML = `
@@ -3241,10 +3282,23 @@ h1, h2, h3, h4, h5, h6 {
           </div>
           <form onsubmit="handleCheckOutSubmit(event, '${visitId}')">
             <div class="modal-body">
-              <div style="background: var(--bg-primary); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
-                <div><strong>Client:</strong> ${getClientName(visit.Client_ID)}</div>
-                <div><strong>Check-In Time:</strong> ${visit.Check_In_Time}</div>
+              <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Client Account</div>
+                  <strong style="color: var(--text-main); font-size: 0.95rem;">${getClientName(visit.Client_ID)}</strong>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Check-In Time</div>
+                  <strong style="color: var(--primary); font-size: 0.95rem;">${visit.Check_In_Time}</strong>
+                </div>
               </div>
+
+              <div class="form-group">
+                <label class="form-label">Time Spent (Minutes) *</label>
+                <input type="number" class="form-control" id="co-time-spent" min="1" value="${elapsedMins}" required>
+                <small style="color: var(--text-muted); font-size: 0.75rem;">Dynamic elapsed time calculated from check-in to check-out.</small>
+              </div>
+
               <div class="form-group">
                 <label class="form-label">Meeting Outcome & Next Action *</label>
                 <textarea class="form-control" id="co-notes" rows="3" required placeholder="Summary of meeting, client feedback..."></textarea>
@@ -3267,7 +3321,9 @@ h1, h2, h3, h4, h5, h6 {
 
     const now = new Date();
     visit.Check_Out_Time = now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    visit.Time_Spent_Mins = 35;
+    const timeSpentInput = document.getElementById("co-time-spent");
+    const spentMins = timeSpentInput ? Number(timeSpentInput.value) : 1;
+    visit.Time_Spent_Mins = Math.max(1, spentMins || 1);
     visit.Outcome_Status = "COMPLETED";
     const coNotes = document.getElementById("co-notes") ? document.getElementById("co-notes").value.trim() : "";
     if (coNotes) {
@@ -3281,7 +3337,12 @@ h1, h2, h3, h4, h5, h6 {
 
     closeModal();
     renderView(state.currentView);
-    showToast(`Visit completed for ${getClientName(visit.Client_ID)}!`, "success");
+    showToast(`Visit completed (${visit.Time_Spent_Mins} mins) for ${getClientName(visit.Client_ID)}!`, "success");
+
+    // Asynchronously sync check-out with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_visit', visit);
+    }
   }
 
   /**
@@ -3515,7 +3576,7 @@ h1, h2, h3, h4, h5, h6 {
           </div>
           <form onsubmit="handleOrderSubmit(event)">
             <div class="modal-body">
-              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+              <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 12px;">
                 
                 <!-- Searchable Client Field -->
                 <div class="form-group search-select-wrap">
@@ -3523,6 +3584,11 @@ h1, h2, h3, h4, h5, h6 {
                   <input type="text" class="form-control" id="o-client-search" placeholder="Type client name to search..." autocomplete="off" oninput="handleOrderClientSearch(this.value)" value="${targetClientName}" required>
                   <div class="search-select-options" id="o-client-options"></div>
                   <input type="hidden" id="o-client" value="${targetClientId}" required>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Order Date *</label>
+                  <input type="date" class="form-control" id="o-date" value="${new Date().toISOString().split('T')[0]}" required>
                 </div>
 
                 <div class="form-group">
@@ -3857,12 +3923,13 @@ h1, h2, h3, h4, h5, h6 {
     const finalGrand = Math.max(0, Math.round(subtotalTaxable - extraDiscAmount + totalGST));
     const orderId = "ORD-2026-" + Math.floor(1000 + Math.random() * 9000);
 
+    const orderDate = (document.getElementById("o-date") ? document.getElementById("o-date").value : "") || new Date().toISOString().split('T')[0];
     const newOrder = {
       Order_ID: orderId,
-      Date: "2026-09-30",
+      Date: orderDate,
       Expected_Delivery_Date: edd,
       Client_ID: clientId,
-      User_ID: state.currentUser.User_ID,
+      User_ID: state.currentUser ? state.currentUser.User_ID : "USR-102",
       Items: validItems.map(it => ({
         sku: it.sku,
         name: it.name,
@@ -3888,10 +3955,21 @@ h1, h2, h3, h4, h5, h6 {
       _syncStatus: "synced"
     };
 
+    // Update local client outstanding balance
+    const targetCli = (state.clients || []).find(c => c.Client_ID === clientId);
+    if (targetCli) {
+      targetCli.Outstanding_Balance = (Number(targetCli.Outstanding_Balance) || 0) + finalGrand;
+    }
+
     state.orders.unshift(newOrder);
     closeModal();
     renderView(state.currentView);
-    showToast(`Order ${orderId} booked with EDD ${edd}!`, "success");
+    showToast(`Order ${orderId} booked on ${orderDate}!`, "success");
+
+    // Asynchronously sync with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_order', newOrder);
+    }
 
     // Prompt immediate dispatch options
     openOrderCommsModal(orderId);
@@ -4225,7 +4303,7 @@ h1, h2, h3, h4, h5, h6 {
           <form onsubmit="handlePaymentSubmit(event)">
             <div class="modal-body">
               
-              <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px;">
+              <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 12px;">
                 <!-- Searchable Client Name Field -->
                 <div class="form-group search-select-wrap">
                   <label class="form-label">Client Name *</label>
@@ -4234,9 +4312,15 @@ h1, h2, h3, h4, h5, h6 {
                   <input type="hidden" id="p-client" value="${targetClientId}" required>
                 </div>
 
+                <!-- Payment Collection Date -->
+                <div class="form-group">
+                  <label class="form-label">Payment Date *</label>
+                  <input type="date" class="form-control" id="p-date" value="${new Date().toISOString().split('T')[0]}" required>
+                </div>
+
                 <!-- Total Payment Amount Received -->
                 <div class="form-group">
-                  <label class="form-label">Total Amount Received (₹) *</label>
+                  <label class="form-label">Amount Received (₹) *</label>
                   <input type="number" class="form-control" id="p-amount" min="1" placeholder="e.g. 25000" oninput="handlePaymentAmountInput()" required style="font-size: 1.1rem; font-weight: 700; color: var(--primary);">
                 </div>
               </div>
@@ -4341,6 +4425,15 @@ h1, h2, h3, h4, h5, h6 {
     const unpaidOrders = clientOrders.filter(o => {
       const bal = Number(o.Total_Amount) - Number(o.Paid_Amount || 0);
       return bal > 0 || o.Order_ID === prePopulatedOrderId;
+    });
+
+    // Sort strictly chronologically by date and Order ID ascending (FIFO: Oldest Order First)
+    unpaidOrders.sort((a, b) => {
+      const d1 = new Date(a.Date || 0);
+      const d2 = new Date(b.Date || 0);
+      if (d1 < d2) return -1;
+      if (d1 > d2) return 1;
+      return String(a.Order_ID || "").localeCompare(String(b.Order_ID || ""));
     });
 
     if (unpaidOrders.length === 0) {
@@ -4498,13 +4591,14 @@ h1, h2, h3, h4, h5, h6 {
       ? "General On-Account" 
       : (allocations.length === 1 ? allocations[0].orderId : allocations.map(a => a.orderId).join(", "));
 
+    const paymentDate = (document.getElementById("p-date") ? document.getElementById("p-date").value : "") || new Date().toISOString().split('T')[0];
     const newP = {
       Payment_ID: paymentId,
       Order_ID: orderRefSummary,
       Allocations: allocations,
-      Date: "2026-09-30",
+      Date: paymentDate,
       Client_ID: clientId,
-      User_ID: state.currentUser.User_ID,
+      User_ID: state.currentUser ? state.currentUser.User_ID : "USR-102",
       Amount: amount,
       Payment_Mode: mode,
       Ref_Cheque_No: ref,
@@ -4513,24 +4607,19 @@ h1, h2, h3, h4, h5, h6 {
       _syncStatus: "synced"
     };
 
-    // Deduct client outstanding balance
+    // Deduct client outstanding balance in state
     const client = state.clients.find(c => c.Client_ID === clientId);
     if (client) client.Outstanding_Balance = Math.max(0, (client.Outstanding_Balance || 0) - amount);
 
     state.payments.unshift(newP);
     closeModal();
     renderView(state.currentView);
-    showToast(`Payment receipt ₹${amount.toLocaleString()} recorded successfully!`, "success");
+    showToast(`Payment receipt ₹${amount.toLocaleString()} recorded for ${paymentDate}!`, "success");
 
-    // Asynchronously sync with backend Google Sheets
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res && res.success) console.log("Payment synced to backend:", res);
-      })
-      .withFailureHandler(err => {
-        console.warn("Backend payment sync warning:", err);
-      })
-      .savePayment(state.license.key, newP);
+    // Asynchronously sync with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_payment', newP);
+    }
 
     // Prompt Email/WhatsApp dispatch
     openPaymentCommsModal(paymentId);
@@ -4583,7 +4672,94 @@ h1, h2, h3, h4, h5, h6 {
   window.openPaymentCommsModal = openPaymentCommsModal;
 })();
 </script>
-  <script>
+  <style>
+.exp-timeline {
+    display: flex;
+    justify-content: space-between;
+    position: relative;
+    margin: 1.5rem 0 1rem;
+  }
+  .exp-timeline::before {
+    content: '';
+    position: absolute;
+    top: 18px;
+    left: 40px;
+    right: 40px;
+    height: 3px;
+    background: var(--border-color);
+    z-index: 1;
+  }
+  .exp-step {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    flex: 1;
+  }
+  .exp-step-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--bg-primary);
+    border: 3px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 6px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+  }
+  .exp-step.active .exp-step-icon {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: rgba(15, 118, 110, 0.1);
+  }
+  .exp-step.completed .exp-step-icon {
+    border-color: var(--success);
+    background: var(--success);
+    color: #fff;
+  }
+  .exp-step.rejected .exp-step-icon {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: #fff;
+  }
+  .exp-step-title {
+    font-size: 0.775rem;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+  .exp-step-sub {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+  }
+  .badge-pending-l1 {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fde68a;
+  }
+  .badge-pending-l2 {
+    background: #e0e7ff;
+    color: #4338ca;
+    border: 1px solid #c7d2fe;
+  }
+  .badge-pending-l3 {
+    background: #fae8ff;
+    color: #86198f;
+    border: 1px solid #f0abfc;
+  }
+  .badge-clarity {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+  }
+  .badge-approved-acc {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+  }
+</style>
+<script>
 /**
    * =========================================================================
    * EXPENSES MODULE STATE & HELPERS
@@ -5174,15 +5350,10 @@ h1, h2, h3, h4, h5, h6 {
 
     window.editingClaimId = null;
 
-    // Asynchronously sync with backend Google Sheets
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res && res.success) console.log("Expense claim synced to backend:", res);
-      })
-      .withFailureHandler(err => {
-        console.warn("Backend expense sync notice:", err);
-      })
-      .saveExpense(state.license.key, state.expenses.find(x => x.Claim_ID === claimId));
+    // Asynchronously sync with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_expense', state.expenses.find(x => x.Claim_ID === claimId));
+    }
   }
 
   /**
@@ -5239,6 +5410,339 @@ h1, h2, h3, h4, h5, h6 {
   /**
    * 5. MULTI-LEVEL APPROVAL POPUP MODAL (L1, L2, & L3)
    */
+  function openExpenseApprovalModal(claimId, level) {
+    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    if (!claim) return;
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 580px;">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-signature" style="color: var(--primary); margin-right: 0.5rem;"></i> Sign-off Level ${level} Approval: ${claimId}</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
+                <span><strong>Employee:</strong> ${getUserName(claim.User_ID)}</span>
+                <span style="font-weight: 700; color: var(--primary);">Total: ₹${Number(claim.Total_Amount).toLocaleString()}</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);"><strong>Title:</strong> ${claim.Title || 'Expense Claim'} | <strong>Date:</strong> ${claim.Date}</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Review Remarks / Approval Notes</label>
+              <textarea class="form-control" id="exp-sign-remarks" rows="3" placeholder="e.g. Verified client visits and travel receipts. Approved."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button type="button" class="btn btn-danger btn-sm" onclick="processExpenseDecision('${claimId}', ${level}, 'REJECTED')"><i class="fas fa-times"></i> Reject</button>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="processExpenseDecision('${claimId}', ${level}, 'CLARITY_NEEDED')"><i class="fas fa-question-circle"></i> Request Clarity</button>
+              <button type="button" class="btn btn-success" onclick="processExpenseDecision('${claimId}', ${level}, 'APPROVED')"><i class="fas fa-check"></i> Approve Level ${level}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function processExpenseDecision(claimId, level, decision) {
+    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    if (!claim) return;
+
+    const remarks = document.getElementById("exp-sign-remarks")?.value || "";
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
+    if (level === 1) {
+      claim.Approver_1_Status = decision;
+      claim.Approver_1_Remarks = remarks;
+      claim.Approver_1_Date = nowStr;
+
+      if (decision === "APPROVED") {
+        if (claim.Requires_L2 && claim.Approver_2_ID) {
+          claim.Overall_Approval_Status = "PENDING_L2";
+          showToast(`Level 1 Signed! Claim routed to Level 2 Approver (${getUserName(claim.Approver_2_ID)}).`, "success");
+        } else {
+          claim.Overall_Approval_Status = "APPROVED";
+          showToast(`Claim ${claimId} fully approved! Forwarded to Accounts for payout.`, "success");
+        }
+      } else {
+        claim.Overall_Approval_Status = decision;
+        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
+      }
+    } else if (level === 2) {
+      claim.Approver_2_Status = decision;
+      claim.Approver_2_Remarks = remarks;
+      claim.Approver_2_Date = nowStr;
+
+      if (decision === "APPROVED") {
+        if (claim.Requires_L3 && claim.Approver_3_ID) {
+          claim.Overall_Approval_Status = "PENDING_L3";
+          showToast(`Level 2 Signed! Claim routed to Level 3 Approver (${getUserName(claim.Approver_3_ID)}).`, "success");
+        } else {
+          claim.Overall_Approval_Status = "APPROVED";
+          showToast(`Level 2 Signed! Claim ${claimId} fully approved for Accounts payout.`, "success");
+        }
+      } else {
+        claim.Overall_Approval_Status = decision;
+        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
+      }
+    } else if (level === 3) {
+      claim.Approver_3_Status = decision;
+      claim.Approver_3_Remarks = remarks;
+      claim.Approver_3_Date = nowStr;
+
+      if (decision === "APPROVED") {
+        claim.Overall_Approval_Status = "APPROVED";
+        showToast(`Level 3 Signed! Claim ${claimId} fully approved for Accounts payout.`, "success");
+      } else {
+        claim.Overall_Approval_Status = decision;
+        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
+      }
+    }
+
+    closeModal();
+    renderView("expenses");
+  }
+
+  /**
+   * 6. ACCOUNTS SETTLEMENT & PAYOUT MODAL
+   */
+  function openExpenseSettlementModal(claimId) {
+    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    if (!claim) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 580px;">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-file-invoice-dollar" style="color: var(--primary); margin-right: 0.5rem;"></i> Settle & Disburse Expense: ${claimId}</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <form onsubmit="handleAccountsSettlementSubmit(event, '${claimId}')">
+            <div class="modal-body">
+              
+              <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
+                  <span><strong>Employee:</strong> ${getUserName(claim.User_ID)}</span>
+                  <span style="font-size: 1.1rem; font-weight: 800; color: var(--primary);">Payout Due: ₹${Number(claim.Total_Amount).toLocaleString()}</span>
+                </div>
+                <div style="font-size: 0.775rem; color: var(--text-muted);"><i class="fas fa-check-double" style="color:var(--success);"></i> Fully Signed-off by L1: ${getUserName(claim.Approver_1_ID)} ${claim.Requires_L2 ? '& L2: ' + getUserName(claim.Approver_2_ID) : ''} ${claim.Requires_L3 ? '& L3: ' + getUserName(claim.Approver_3_ID) : ''}</div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                  <label class="form-label">Disbursement Mode *</label>
+                  <select class="form-control" id="settle-mode" required>
+                    <option value="NEFT / Bank Transfer">NEFT / Bank Transfer</option>
+                    <option value="UPI / Instant Transfer">UPI / Instant Transfer</option>
+                    <option value="Company Cash Reimbursement">Cash Reimbursement</option>
+                    <option value="Corporate Cheque">Corporate Cheque</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Settlement Date *</label>
+                  <input type="date" class="form-control" id="settle-date" value="${today}" required>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Transaction / UTR / Reference No *</label>
+                <input type="text" class="form-control" id="settle-utr" placeholder="e.g. UTR-HDFC-99182312 or Cash Voucher #102" required>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Accounts Settlement Remarks</label>
+                <input type="text" class="form-control" id="settle-remarks" placeholder="e.g. Processed via batch payroll reimbursement">
+              </div>
+
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary"><i class="fas fa-check-circle"></i> Confirm Payout & Settle</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  function handleAccountsSettlementSubmit(e, claimId) {
+    e.preventDefault();
+    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    if (!claim) return;
+
+    const mode = document.getElementById("settle-mode").value;
+    const date = document.getElementById("settle-date").value;
+    const utr = document.getElementById("settle-utr").value;
+    const remarks = document.getElementById("settle-remarks").value;
+
+    claim.Accounts_Status = "SETTLED";
+    claim.Accounts_Payment_Mode = mode;
+    claim.Accounts_Settled_Date = date;
+    claim.Accounts_UTR_Ref = utr;
+    claim.Accounts_Remarks = remarks;
+
+    closeModal();
+    renderView("expenses");
+    showToast(`Claim ${claimId} successfully settled & marked as PAID via ${mode}!`, "success");
+
+    // Asynchronously update backend Google Sheet
+    google.script.run
+      .withSuccessHandler(res => {
+        if (res && res.success) console.log("Expense settlement synced to backend:", res);
+      })
+      .withFailureHandler(err => {
+        console.warn("Backend expense settlement notice:", err);
+      })
+      .updateExpenseStatus(state.license.key, claimId, "ACCOUNTS", "SETTLED", `${mode} | Ref: ${utr}`);
+  }
+
+  /**
+   * 7. DETAILED EXPENSE AUDIT TRAIL & LINE ITEMS MODAL
+   */
+  function openExpenseDetailsModal(claimId) {
+    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    if (!claim) return;
+
+    const lines = claim.Line_Items || [];
+    const isL1Done = claim.Approver_1_Status === "APPROVED";
+    const isL2Done = !claim.Requires_L2 || claim.Approver_2_Status === "APPROVED";
+    const isL3Done = !claim.Requires_L3 || claim.Approver_3_Status === "APPROVED";
+    const isSettled = claim.Accounts_Status === "SETTLED";
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container modal-lg">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-file-alt" style="color: var(--primary); margin-right: 0.5rem;"></i> Expense Claim Details: ${claimId}</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            
+            
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; background: var(--bg-primary); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 14px;">
+              <div>
+                <h4 style="margin: 0 0 4px; font-size: 1rem;">${claim.Title || 'Expense Claim'}</h4>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                  <strong>Employee:</strong> ${getUserName(claim.User_ID)} (${claim.User_ID}) | <strong>Date:</strong> ${claim.Date}
+                </div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Total Claim Amount</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: var(--primary);">₹${Number(claim.Total_Amount).toLocaleString()}</div>
+              </div>
+            </div>
+
+            
+            <div class="exp-timeline">
+              
+              <div class="exp-step completed">
+                <div class="exp-step-icon"><i class="fas fa-paper-plane"></i></div>
+                <div class="exp-step-title">Submitted</div>
+                <div class="exp-step-sub">${claim.Date}</div>
+              </div>
+
+              
+              <div class="exp-step ${isL1Done ? 'completed' : (claim.Approver_1_Status === 'REJECTED' ? 'rejected' : 'active')}">
+                <div class="exp-step-icon"><i class="fas fa-user-check"></i></div>
+                <div class="exp-step-title">1st Approver</div>
+                <div class="exp-step-sub">${getUserName(claim.Approver_1_ID)} (${claim.Approver_1_Status || 'PENDING'})</div>
+              </div>
+
+              
+              ${claim.Requires_L2 ? `
+                <div class="exp-step ${isL2Done && isL1Done ? 'completed' : (claim.Approver_2_Status === 'REJECTED' ? 'rejected' : (isL1Done ? 'active' : ''))}">
+                  <div class="exp-step-icon"><i class="fas fa-user-shield"></i></div>
+                  <div class="exp-step-title">2nd Approver</div>
+                  <div class="exp-step-sub">${getUserName(claim.Approver_2_ID)} (${claim.Approver_2_Status || 'PENDING'})</div>
+                </div>
+              ` : ''}
+
+              
+              ${claim.Requires_L3 ? `
+                <div class="exp-step ${isL3Done && isL2Done && isL1Done ? 'completed' : (claim.Approver_3_Status === 'REJECTED' ? 'rejected' : (isL2Done && isL1Done ? 'active' : ''))}">
+                  <div class="exp-step-icon"><i class="fas fa-user-tie"></i></div>
+                  <div class="exp-step-title">3rd Approver</div>
+                  <div class="exp-step-sub">${getUserName(claim.Approver_3_ID)} (${claim.Approver_3_Status || 'PENDING'})</div>
+                </div>
+              ` : ''}
+
+              
+              <div class="exp-step ${isSettled ? 'completed' : (isL1Done && isL2Done && isL3Done ? 'active' : '')}">
+                <div class="exp-step-icon"><i class="fas fa-hand-holding-usd"></i></div>
+                <div class="exp-step-title">Accounts Payout</div>
+                <div class="exp-step-sub">${claim.Accounts_Status === 'SETTLED' ? 'SETTLED' : 'Pending'}</div>
+              </div>
+            </div>
+
+            
+            <h4 style="font-size: 0.9rem; font-weight: 700; margin: 16px 0 8px;"><i class="fas fa-list-check" style="color: var(--primary);"></i> Itemized Breakdown (${lines.length} items)</h4>
+            <table class="order-items-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Description / Route / Purpose</th>
+                  <th style="text-align: right;">Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lines.map((it, idx) => `
+                  <tr>
+                    <td>${idx + 1}</td>
+                    <td>${it.date || claim.Date}</td>
+                    <td><span class="badge badge-on-hold">${it.category}</span></td>
+                    <td>${it.desc || '-'}</td>
+                    <td style="text-align: right; font-weight: 700; color: var(--primary);">₹${Number(it.amount).toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+
+            
+            ${claim.Attachment ? `
+              <div style="margin-top: 14px; font-size: 0.85rem;">
+                <strong>Attached Bills & Receipts:</strong>
+                <div style="margin-top: 6px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('EXPENSE', '${claim.Claim_ID}')"><i class="fas fa-paperclip"></i> View Uploaded Bill Receipt Attachment</button>
+                </div>
+              </div>
+            ` : ''}
+
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+// Global Exports
+window.renderExpenses = typeof renderExpenses !== 'undefined' ? renderExpenses : undefined;
+window.filterExpensesTable = typeof filterExpensesTable !== 'undefined' ? filterExpensesTable : undefined;
+window.renderExpenseRows = typeof renderExpenseRows !== 'undefined' ? renderExpenseRows : undefined;
+window.openNewExpenseModal = typeof openNewExpenseModal !== 'undefined' ? openNewExpenseModal : undefined;
+window.handleExpenseLayersCountChange = typeof handleExpenseLayersCountChange !== 'undefined' ? handleExpenseLayersCountChange : undefined;
+window.renderExpenseModalLines = typeof renderExpenseModalLines !== 'undefined' ? renderExpenseModalLines : undefined;
+window.addExpenseLineItem = typeof addExpenseLineItem !== 'undefined' ? addExpenseLineItem : undefined;
+window.removeExpenseLineItem = typeof removeExpenseLineItem !== 'undefined' ? removeExpenseLineItem : undefined;
+window.handleExpenseReceiptCapture = typeof handleExpenseReceiptCapture !== 'undefined' ? handleExpenseReceiptCapture : undefined;
+window.handleExpenseSubmit = typeof handleExpenseSubmit !== 'undefined' ? handleExpenseSubmit : undefined;
+window.openExpenseApprovalModal = typeof openExpenseApprovalModal !== 'undefined' ? openExpenseApprovalModal : undefined;
+window.handleExpenseApprovalSubmit = typeof handleExpenseApprovalSubmit !== 'undefined' ? handleExpenseApprovalSubmit : undefined;
+window.openExpenseSettlementModal = typeof openExpenseSettlementModal !== 'undefined' ? openExpenseSettlementModal : undefined;
+window.handleAccountsSettlementSubmit = typeof handleAccountsSettlementSubmit !== 'undefined' ? handleAccountsSettlementSubmit : undefined;
+window.openExpenseDetailsModal = typeof openExpenseDetailsModal !== 'undefined' ? openExpenseDetailsModal : undefined;
+window.sendExpenseFollowUp = typeof sendExpenseFollowUp !== 'undefined' ? sendExpenseFollowUp : undefined;
 </script>
   <script>
 function openExpenseApprovalModal(claimId, level) {
@@ -5575,8 +6079,79 @@ window.handleAccountsSettlementSubmit = typeof handleAccountsSettlementSubmit !=
 window.openExpenseDetailsModal = typeof openExpenseDetailsModal !== 'undefined' ? openExpenseDetailsModal : undefined;
 window.sendExpenseFollowUp = typeof sendExpenseFollowUp !== 'undefined' ? sendExpenseFollowUp : undefined;
 </script>
-  <script>
-let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RESOLVED
+  <style>
+.ticket-badge-service {
+    background: rgba(2, 132, 199, 0.12);
+    color: #0284c7;
+    border: 1px solid rgba(2, 132, 199, 0.3);
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ticket-badge-complaint {
+    background: rgba(220, 38, 38, 0.12);
+    color: #dc2626;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .priority-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .priority-critical { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+  .priority-high { background: #ffedd5; color: #9a3412; border: 1px solid #fb923c; }
+  .priority-medium { background: #fef9c3; color: #854d0e; border: 1px solid #facc15; }
+  .priority-low { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+  .status-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .status-open { background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
+  .status-scheduled { background: #eff6ff; color: #1d4ed8; border: 1px solid #93c5fd; }
+  .status-inprogress { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .status-resolved { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .status-closed { background: #f8fafc; color: #334155; border: 1px solid #e2e8f0; }
+
+  .service-tab-btn {
+    padding: 6px 14px;
+    font-size: 0.825rem;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .service-tab-btn.active {
+    background: var(--primary);
+    color: #ffffff;
+    border-color: var(--primary);
+    box-shadow: 0 2px 6px rgba(15, 118, 110, 0.25);
+  }
+</style>
+<script>
+window.window.activeTicketCategoryFilter = window.window.activeTicketCategoryFilter || "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RESOLVED
   let currentEditingTicketId = null;
 
   /**
@@ -5596,7 +6171,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
     const filteredTickets = getFilteredTicketsList(filterQuery);
 
     container.innerHTML = `
-      <!-- Dual Booking Action Buttons Bar -->
+      
       <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 10px;">
         <button class="btn btn-primary" onclick="openNewServiceModal()" style="font-weight: 600; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.25); background: #0284c7; border-color: #0284c7;">
           <i class="fas fa-wrench"></i> + Book Service Request
@@ -5606,7 +6181,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         </button>
       </div>
 
-      <!-- Quick Metrics Grid -->
+      
       <div class="dashboard-grid" style="margin-bottom: 1.25rem;">
         <div class="stats-card card-sky">
           <div class="stats-info">
@@ -5638,22 +6213,22 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         </div>
       </div>
 
-      <!-- Tab Filter Bar with Category Pills & Real-time Search -->
+      
       <div class="tab-filter-bar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 1rem;">
         
-        <!-- Search Input (Preserves Focus) -->
+        
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 380px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
           <input type="text" id="tickets-search-input" class="form-control" placeholder="Search Ticket ID, Client, Category, Staff..." value="${state.filters.complaints || ''}" oninput="filterTicketsTable(this.value)">
         </div>
 
-        <!-- Category Selector Pills -->
+        
         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-          <button type="button" class="service-tab-btn ${activeTicketCategoryFilter === 'ALL' ? 'active' : ''}" onclick="setTicketCategoryFilter('ALL')">All (${totalCount})</button>
-          <button type="button" class="service-tab-btn ${activeTicketCategoryFilter === 'SERVICE' ? 'active' : ''}" onclick="setTicketCategoryFilter('SERVICE')"><i class="fas fa-wrench"></i> Services</button>
-          <button type="button" class="service-tab-btn ${activeTicketCategoryFilter === 'COMPLAINT' ? 'active' : ''}" onclick="setTicketCategoryFilter('COMPLAINT')"><i class="fas fa-exclamation-circle"></i> Complaints</button>
-          <button type="button" class="service-tab-btn ${activeTicketCategoryFilter === 'OPEN' ? 'active' : ''}" onclick="setTicketCategoryFilter('OPEN')"><i class="fas fa-clock"></i> Active / Open</button>
-          <button type="button" class="service-tab-btn ${activeTicketCategoryFilter === 'RESOLVED' ? 'active' : ''}" onclick="setTicketCategoryFilter('RESOLVED')"><i class="fas fa-check"></i> Resolved</button>
+          <button type="button" class="service-tab-btn ${window.activeTicketCategoryFilter === 'ALL' ? 'active' : ''}" onclick="setTicketCategoryFilter('ALL')">All (${totalCount})</button>
+          <button type="button" class="service-tab-btn ${window.activeTicketCategoryFilter === 'SERVICE' ? 'active' : ''}" onclick="setTicketCategoryFilter('SERVICE')"><i class="fas fa-wrench"></i> Services</button>
+          <button type="button" class="service-tab-btn ${window.activeTicketCategoryFilter === 'COMPLAINT' ? 'active' : ''}" onclick="setTicketCategoryFilter('COMPLAINT')"><i class="fas fa-exclamation-circle"></i> Complaints</button>
+          <button type="button" class="service-tab-btn ${window.activeTicketCategoryFilter === 'OPEN' ? 'active' : ''}" onclick="setTicketCategoryFilter('OPEN')"><i class="fas fa-clock"></i> Active / Open</button>
+          <button type="button" class="service-tab-btn ${window.activeTicketCategoryFilter === 'RESOLVED' ? 'active' : ''}" onclick="setTicketCategoryFilter('RESOLVED')"><i class="fas fa-check"></i> Resolved</button>
         </div>
 
         <div style="font-size: 0.8rem; color: var(--text-muted);">
@@ -5661,7 +6236,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         </div>
       </div>
 
-      <!-- Tickets Ledger Table -->
+      
       <div class="table-wrapper">
         <table class="data-table">
           <thead>
@@ -5695,10 +6270,10 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
 
     return all.filter(t => {
       // Category filter
-      if (activeTicketCategoryFilter === "SERVICE" && t.Type !== "SERVICE") return false;
-      if (activeTicketCategoryFilter === "COMPLAINT" && t.Type === "SERVICE") return false;
-      if (activeTicketCategoryFilter === "OPEN" && (t.Status === "RESOLVED" || t.Status === "CLOSED")) return false;
-      if (activeTicketCategoryFilter === "RESOLVED" && t.Status !== "RESOLVED" && t.Status !== "CLOSED") return false;
+      if (window.activeTicketCategoryFilter === "SERVICE" && t.Type !== "SERVICE") return false;
+      if (window.activeTicketCategoryFilter === "COMPLAINT" && t.Type === "SERVICE") return false;
+      if (window.activeTicketCategoryFilter === "OPEN" && (t.Status === "RESOLVED" || t.Status === "CLOSED")) return false;
+      if (window.activeTicketCategoryFilter === "RESOLVED" && t.Status !== "RESOLVED" && t.Status !== "CLOSED") return false;
 
       // Text query match
       if (!q) return true;
@@ -5727,7 +6302,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
   }
 
   function setTicketCategoryFilter(cat) {
-    activeTicketCategoryFilter = cat;
+    window.activeTicketCategoryFilter = cat;
     renderComplaints(document.getElementById("app-content"));
   }
 
@@ -5807,15 +6382,15 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
           </td>
           <td>
             <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-              <!-- 1. View Details -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="openTicketDetailsModal('${t.Ticket_ID}')" title="View Full Ticket Details & History"><i class="fas fa-eye"></i></button>
 
-              <!-- 2. Integrated Site Visit Dispatch -->
+              
               <button type="button" class="btn btn-secondary btn-sm" style="color: var(--primary); font-weight: 600;" onclick="scheduleTicketSiteVisit('${t.Ticket_ID}')" title="Dispatch / Check-in Site Visit for this Ticket">
                 <i class="fas fa-map-marker-alt"></i> Visit
               </button>
 
-              <!-- 3. Update & Resolve / Close -->
+              
               ${!isResolved ? `
                 <button type="button" class="btn btn-success btn-sm" onclick="openResolveTicketModal('${t.Ticket_ID}')" title="Update Progress, Add Notes & Resolve Ticket">
                   <i class="fas fa-check"></i> Close
@@ -5826,7 +6401,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </button>
               `}
 
-              <!-- 4. WhatsApp / Email Communication -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="sendTicketComms('${t.Ticket_ID}')" title="Share Update via WhatsApp / Email">
                 <i class="fas fa-paper-plane"></i>
               </button>
@@ -5866,7 +6441,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
           <form onsubmit="handleComplaintSubmit(event)" style="display: flex; flex-direction: column; overflow: hidden; flex: 1;">
             <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;">
               
-              <!-- Row 1: Searchable Client & Ticket Date -->
+              
               <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
                 <div class="form-group search-select-wrap" style="margin: 0;">
                   <label class="form-label"><i class="fas fa-building" style="color: var(--primary);"></i> Client Name *</label>
@@ -5884,7 +6459,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Row 2: Product / Machine & Category -->
+              
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                 <div class="form-group" style="margin: 0;">
                   <label class="form-label"><i class="fas fa-box" style="color: var(--primary);"></i> Product / Equipment SKU Involved</label>
@@ -5908,7 +6483,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Row 3: Priority & Assigned Staff -->
+              
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                 <div class="form-group" style="margin: 0;">
                   <label class="form-label"><i class="fas fa-bell" style="color: #dc2626;"></i> Severity / Priority *</label>
@@ -5941,19 +6516,19 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Problem Summary Title -->
+              
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="form-label">Brief Problem Summary *</label>
                 <input type="text" class="form-control" id="c-title" placeholder="e.g. Drill chuck vibrating violently & overheating within 5 mins" value="${editTicket ? (editTicket.Title || editTicket.Issue_Details || '') : ''}" required>
               </div>
 
-              <!-- Detailed Description -->
+              
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="form-label">Detailed Symptoms / Customer Remarks</label>
                 <textarea class="form-control" id="c-issue" rows="3" placeholder="Describe the issue, operational symptoms, customer feedback, and any error codes...">${editTicket ? (editTicket.Issue_Details || '') : ''}</textarea>
               </div>
 
-              <!-- Defect Photo / Video Proof Attachment -->
+              
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="form-label"><i class="fas fa-camera" style="color: var(--primary);"></i> Photo / Defect Evidence Attachment</label>
                 <div class="attachment-preview-box" onclick="document.getElementById('c-file-input').click()">
@@ -5966,7 +6541,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 <input type="file" id="c-file-input" style="display: none;" accept="image/*,application/pdf" onchange="handleFilePreview(this, 'c-file-img', 'c-file-label')">
               </div>
 
-              <!-- Quick Action Checkbox: Dispatch Site Visit Now -->
+              
               <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); padding: 10px 14px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
                 <input type="checkbox" id="c-create-visit" style="width: 18px; height: 18px; cursor: pointer;" ${!editTicket ? 'checked' : ''}>
                 <label for="c-create-visit" style="margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-main); cursor: pointer;">
@@ -6078,21 +6653,585 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         };
         state.visits.unshift(autoVisit);
       }
+
+      // Asynchronously sync with Google Sheets Database
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_complaint', newTicket);
+      }
     }
 
     closeModal();
     renderComplaints(document.getElementById("app-content"));
   }
 
-  window.renderComplaints = renderComplaints;
-  window.getFilteredTicketsList = getFilteredTicketsList;
-  window.filterTicketsTable = filterTicketsTable;
-  window.setTicketCategoryFilter = setTicketCategoryFilter;
-  window.renderTicketRows = renderTicketRows;
-  window.openNewComplaintModal = openNewComplaintModal;
-  window.handleComplaintClientSearch = handleComplaintClientSearch;
-  window.selectComplaintClient = selectComplaintClient;
-  window.handleComplaintSubmit = handleComplaintSubmit;
+
+  /**
+   * 3. SERVICE BOOKING REQUEST MODAL (WITH SEARCHABLE CLIENT PICKER)
+   */
+  function openNewServiceModal(editTicketId = null) {
+    currentEditingTicketId = editTicketId;
+    let editTicket = editTicketId ? state.complaints.find(c => c.Ticket_ID === editTicketId) : null;
+
+    const today = new Date().toISOString().split('T')[0];
+    const technicians = state.users.filter(u => u.Role === 'FIELD_STAFF' || u.Role === 'MANAGER' || u.Role === 'ADMIN');
+
+    const defaultClientId = editTicket ? editTicket.Client_ID : (state.activeVisit ? state.activeVisit.Client_ID : "");
+    const defaultClient = state.clients.find(c => c.Client_ID === defaultClientId);
+    const defaultClientName = defaultClient ? defaultClient.Client_Name : "";
+    const defaultClientAddress = defaultClient ? (defaultClient.Address || defaultClient.City_Area || "") : "";
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container modal-lg" style="max-width: 780px; max-height: 92vh; display: flex; flex-direction: column;">
+          <div class="modal-header" style="background: linear-gradient(135deg, rgba(2, 132, 199, 0.08), transparent); border-bottom: 1px solid var(--border-color);">
+            <h3 class="modal-title" style="color: #0284c7; display: flex; align-items: center; gap: 8px;">
+              <i class="fas fa-wrench"></i> ${editTicket ? `Edit Service Booking (${editTicket.Ticket_ID})` : 'Book Field Service / Maintenance Request'}
+            </h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          
+          <form onsubmit="handleServiceSubmit(event)" style="display: flex; flex-direction: column; overflow: hidden; flex: 1;">
+            <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;">
+              
+              
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="form-group search-select-wrap" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-building" style="color: var(--primary);"></i> Client Name *</label>
+                  <input type="text" class="form-control" id="s-client-search" placeholder="Type client name or city to search..." autocomplete="off" oninput="handleServiceClientSearch(this.value)" value="${defaultClientName}" required>
+                  <div class="search-select-options" id="s-client-options"></div>
+                  <input type="hidden" id="s-client" value="${defaultClientId}" required>
+                  <div id="s-client-meta" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 3px;">
+                    ${defaultClient ? `📍 Site: ${defaultClientAddress}` : 'Select registered client from database'}
+                  </div>
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label">Preferred Service Date *</label>
+                  <input type="date" class="form-control" id="s-date" value="${editTicket ? editTicket.Date : today}" required>
+                </div>
+              </div>
+
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-tools" style="color: var(--primary);"></i> Service Request Type *</label>
+                  <select class="form-control" id="s-type" required>
+                    ${(state.masters.serviceTypes || []).map(s => `
+                      <option value="${s}" ${editTicket && editTicket.Category === s ? 'selected' : ''}>${s}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-clock" style="color: var(--primary);"></i> Preferred Time Window *</label>
+                  <select class="form-control" id="s-time-slot" required>
+                    ${(state.masters.timeSlots || []).map(t => `
+                      <option value="${t}" ${editTicket && editTicket.Time_Slot === t ? 'selected' : ''}>${t}</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-box" style="color: var(--primary);"></i> Product / Machine / Serial No.</label>
+                  <select class="form-control" id="s-product">
+                    <option value="">-- General Equipment / Facility --</option>
+                    ${state.inventory.map(p => `
+                      <option value="${p.Product_Name}" ${editTicket && editTicket.Product_Name === p.Product_Name ? 'selected' : ''}>
+                        ${p.Product_Name} (${p.SKU_Code})
+                      </option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-map-pin" style="color: var(--primary);"></i> Service Site Address *</label>
+                  <input type="text" class="form-control" id="s-address" placeholder="Factory / Shop site address..." value="${defaultClientAddress}" required>
+                </div>
+              </div>
+
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-user-hard-hat" style="color: var(--primary);"></i> Assigned Engineer *</label>
+                  <select class="form-control" id="s-assigned" required>
+                    <option value="">-- Select Field Technician --</option>
+                    ${technicians.map(u => `
+                      <option value="${u.User_ID}" ${editTicket ? (editTicket.Assigned_To_User_ID === u.User_ID ? 'selected' : '') : (u.User_ID === state.currentUser.User_ID ? 'selected' : '')}>
+                        ${u.Name} (${u.Role})
+                      </option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label"><i class="fas fa-file-contract" style="color: var(--primary);"></i> Warranty / AMC Coverage</label>
+                  <select class="form-control" id="s-coverage" onchange="toggleServiceCharges(this.value)">
+                    ${(state.masters.warrantyCoverages || []).map(w => `
+                      <option value="${w}" ${editTicket && editTicket.Coverage === w ? 'selected' : ''}>${w}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin: 0;" id="s-charges-wrap">
+                  <label class="form-label">Estimated Service Quote (₹)</label>
+                  <input type="number" class="form-control" id="s-charges" placeholder="0" value="0" min="0">
+                </div>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label">Service Request Summary *</label>
+                <input type="text" class="form-control" id="s-title" placeholder="e.g. 500-hour preventative maintenance & hydraulic oil replacement" value="${editTicket ? (editTicket.Title || editTicket.Issue_Details || '') : ''}" required>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label">Work Scope Details & Technician Instructions</label>
+                <textarea class="form-control" id="s-scope" rows="3" placeholder="List specific checklist items, parts to carry, safety guidelines, and client access instructions...">${editTicket ? (editTicket.Issue_Details || '') : ''}</textarea>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-file-upload" style="color: var(--primary);"></i> Work Order / Equipment Photo Attachment</label>
+                <div class="attachment-preview-box" onclick="document.getElementById('s-file-input').click()">
+                  <i class="fas fa-cloud-upload-alt" style="font-size: 1.5rem; color: #0284c7; margin-bottom: 4px;"></i>
+                  <div style="font-size: 0.775rem; color: var(--text-muted);" id="s-file-label">
+                    ${editTicket && editTicket.Attachment ? 'File attached (click to change)' : 'Upload PO copy / machine photo'}
+                  </div>
+                  <img id="s-file-img" src="${editTicket ? (editTicket.Attachment || '') : ''}" style="${editTicket && editTicket.Attachment ? 'display: block;' : 'display: none;'} max-height: 120px; margin-top: 8px; border-radius: 6px;">
+                </div>
+                <input type="file" id="s-file-input" style="display: none;" accept="image/*,application/pdf" onchange="handleFilePreview(this, 's-file-img', 's-file-label')">
+              </div>
+
+              
+              <div style="background: rgba(2, 132, 199, 0.08); border: 1px solid rgba(2, 132, 199, 0.2); padding: 10px 14px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
+                <input type="checkbox" id="s-create-visit" style="width: 18px; height: 18px; cursor: pointer;" ${!editTicket ? 'checked' : ''}>
+                <label for="s-create-visit" style="margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-main); cursor: pointer;">
+                  <i class="fas fa-calendar-plus" style="color: #0284c7; margin-right: 4px;"></i> Schedule calendar visit in technician's route ledger
+                </label>
+              </div>
+
+            </div>
+
+            <div class="modal-footer" style="padding: 0.85rem 1.25rem; border-top: 1px solid var(--border-color); background: var(--bg-primary); display: flex; justify-content: space-between;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary" style="font-weight: 600; background: #0284c7; border-color: #0284c7;">
+                <i class="fas fa-calendar-check"></i> ${editTicket ? 'Update Service Request' : 'Book Service & Dispatch Engineer'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  function toggleServiceCharges(val) {
+    const wrap = document.getElementById("s-charges-wrap");
+    if (!wrap) return;
+    if (val === "Chargeable Quote") {
+      wrap.style.display = "block";
+    }
+  }
+
+  function handleServiceClientSearch(query) {
+    const opts = document.getElementById("s-client-options");
+    const q = (query || "").toLowerCase();
+    const filtered = state.clients.filter(c => c.Client_Name.toLowerCase().includes(q) || c.Client_ID.toLowerCase().includes(q) || (c.City_Area && c.City_Area.toLowerCase().includes(q)));
+
+    if (filtered.length > 0) {
+      opts.style.display = "block";
+      opts.innerHTML = filtered.map(c => `
+        <div class="search-select-option" onclick="selectServiceClient('${c.Client_ID}', '${c.Client_Name.replace(/'/g, "\\'")}', '${(c.Address || c.City_Area || '').replace(/'/g, "\\'")}')">
+          <strong>${c.Client_Name}</strong> <small style="color:var(--text-muted);">(${c.City_Area || 'HQ'})</small>
+        </div>
+      `).join('');
+    } else {
+      opts.style.display = "none";
+    }
+  }
+
+  function selectServiceClient(id, name, address) {
+    document.getElementById("s-client-search").value = name;
+    document.getElementById("s-client").value = id;
+    const addrInput = document.getElementById("s-address");
+    if (addrInput && address) addrInput.value = address;
+    const meta = document.getElementById("s-client-meta");
+    if (meta) meta.innerHTML = `📍 Site: ${address || 'Verified Client Site'}`;
+    const opts = document.getElementById("s-client-options");
+    if (opts) opts.style.display = "none";
+  }
+
+  /**
+   * Handle Service Booking Submission
+   */
+  function handleServiceSubmit(e) {
+    e.preventDefault();
+    const clientId = document.getElementById("s-client").value;
+    if (!clientId) {
+      showToast("Please search and select a valid registered client.", "error");
+      return;
+    }
+
+    const ticketId = currentEditingTicketId || ("SRV-" + new Date().getFullYear() + "-" + Math.floor(100 + Math.random() * 900));
+    const title = document.getElementById("s-title").value.trim();
+    const scope = document.getElementById("s-scope").value.trim();
+    const photoUrl = document.getElementById("s-file-img") ? document.getElementById("s-file-img").src : "";
+    const shouldCreateVisit = document.getElementById("s-create-visit") ? document.getElementById("s-create-visit").checked : false;
+
+    const newTicket = {
+      Ticket_ID: ticketId,
+      Type: "SERVICE",
+      Date: document.getElementById("s-date").value,
+      Client_ID: clientId,
+      Logged_By_User_ID: state.currentUser.User_ID,
+      Assigned_To_User_ID: document.getElementById("s-assigned").value,
+      Product_Name: document.getElementById("s-product").value,
+      Category: document.getElementById("s-type").value,
+      Priority: "MEDIUM",
+      Title: title,
+      Issue_Details: scope || title,
+      Time_Slot: document.getElementById("s-time-slot").value,
+      Site_Address: document.getElementById("s-address").value,
+      Coverage: document.getElementById("s-coverage").value,
+      Service_Charges: Number(document.getElementById("s-charges").value || 0),
+      Attachment: photoUrl,
+      Status: "SCHEDULED",
+      Resolution_Notes: "",
+      Resolved_At: ""
+    };
+
+    if (currentEditingTicketId) {
+      const idx = state.complaints.findIndex(c => c.Ticket_ID === currentEditingTicketId);
+      if (idx !== -1) {
+        state.complaints[idx] = { ...state.complaints[idx], ...newTicket };
+      }
+      showToast(`Service Request ${ticketId} updated successfully!`, "success");
+    } else {
+      state.complaints.unshift(newTicket);
+      showToast(`Service Booking ${ticketId} scheduled & engineer allotted!`, "success");
+
+      // Auto-schedule Site Visit if checked
+      if (shouldCreateVisit) {
+        const visitId = "VIS-" + new Date().getFullYear() + "-" + String(state.visits.length + 1).padStart(3, '0');
+        const autoVisit = {
+          Visit_ID: visitId,
+          Date: newTicket.Date,
+          User_ID: newTicket.Assigned_To_User_ID || state.currentUser.User_ID,
+          Client_ID: clientId,
+          Purpose: `Service Request: ${ticketId} - ${title.substring(0, 30)}`,
+          Check_In_Time: "Pending",
+          Check_Out_Time: "",
+          Time_Spent_Mins: 0,
+          Check_In_GPS: "Auto GPS",
+          Outcome_Status: "SCHEDULED",
+          Notes: `Service Type: ${newTicket.Category}. Slot: ${newTicket.Time_Slot}. Site: ${newTicket.Site_Address}`,
+          Attachment: ""
+        };
+        state.visits.unshift(autoVisit);
+      }
+    }
+
+    // Asynchronously sync with Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_complaint', newTicket);
+    }
+
+    closeModal();
+    renderComplaints(document.getElementById("app-content"));
+  }
+
+
+  /**
+   * 4. UPDATE PROGRESS & RESOLVE / CLOSE TICKET MODAL
+   */
+  function openResolveTicketModal(ticketId) {
+    const ticket = state.complaints.find(c => c.Ticket_ID === ticketId);
+    if (!ticket) return;
+
+    const client = state.clients.find(c => c.Client_ID === ticket.Client_ID);
+    const clientName = client ? client.Client_Name : ticket.Client_ID;
+    const isService = ticket.Type === "SERVICE";
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 650px; max-height: 90vh; display: flex; flex-direction: column;">
+          <div class="modal-header" style="background: var(--bg-primary); border-bottom: 1px solid var(--border-color);">
+            <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+              <i class="fas fa-check-circle" style="color: var(--success);"></i> Update & Resolve Ticket (${ticket.Ticket_ID})
+            </h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <form onsubmit="handleResolveTicketSubmit(event, '${ticket.Ticket_ID}')" style="display: flex; flex-direction: column; overflow: hidden; flex: 1;">
+            <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;">
+              
+              
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <strong>${clientName}</strong>
+                  <span class="status-pill status-inprogress">${ticket.Status}</span>
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+                  ${isService ? '🛠️ Service Request' : '⚠️ Complaint'}: <strong>${ticket.Category}</strong> - ${ticket.Title || ticket.Issue_Details}
+                </div>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-traffic-light" style="color: var(--primary);"></i> Update Ticket Status *</label>
+                <select class="form-control" id="res-status" required>
+                  <option value="RESOLVED" ${ticket.Status === 'RESOLVED' ? 'selected' : ''}>🟢 RESOLVED (Work Completed & Client Satisfied)</option>
+                  <option value="CLOSED" ${ticket.Status === 'CLOSED' ? 'selected' : ''}>🔒 CLOSED (Final Sign-off / Case Closed)</option>
+                  <option value="IN_PROGRESS" ${ticket.Status === 'IN_PROGRESS' ? 'selected' : ''}>🟡 IN_PROGRESS (Investigation / Work Underway)</option>
+                  <option value="WAITING_FOR_PARTS" ${ticket.Status === 'WAITING_FOR_PARTS' ? 'selected' : ''}>⏳ WAITING_FOR_PARTS (Spare Parts Ordered)</option>
+                </select>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-microscope" style="color: var(--primary);"></i> Root Cause Analysis / Findings</label>
+                <input type="text" class="form-control" id="res-root-cause" placeholder="e.g. Worn motor bearing due to lack of lubrication" value="${ticket.Root_Cause || ''}">
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-wrench" style="color: var(--primary);"></i> Work Done / Corrective Action Taken *</label>
+                <textarea class="form-control" id="res-notes" rows="3" placeholder="Detail the exact steps taken, parts repaired/replaced, calibration test results, and final condition..." required>${ticket.Resolution_Notes || ''}</textarea>
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-cogs" style="color: var(--primary);"></i> Spare Parts Replaced / Materials Consumed</label>
+                <input type="text" class="form-control" id="res-parts" placeholder="e.g. 1x Ball Bearing #6204, 2x O-Ring Seals" value="${ticket.Spare_Parts_Used || ''}">
+              </div>
+
+              
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label"><i class="fas fa-star" style="color: #f59e0b;"></i> Customer Satisfaction & Feedback Rating</label>
+                <select class="form-control" id="res-rating">
+                  <option value="5_STARS" ${ticket.Rating === '5_STARS' ? 'selected' : ''}>⭐⭐⭐⭐⭐ 5 Stars - Excellent / Highly Satisfied</option>
+                  <option value="4_STARS" ${ticket.Rating === '4_STARS' ? 'selected' : ''}>⭐⭐⭐⭐ 4 Stars - Good / Satisfied</option>
+                  <option value="3_STARS" ${ticket.Rating === '3_STARS' ? 'selected' : ''}>⭐⭐⭐ 3 Stars - Average / Acceptable</option>
+                  <option value="2_STARS" ${ticket.Rating === '2_STARS' ? 'selected' : ''}>⭐⭐ 2 Stars - Unsatisfactory</option>
+                  <option value="1_STAR" ${ticket.Rating === '1_STAR' ? 'selected' : ''}>⭐ 1 Star - Poor / Escalation</option>
+                </select>
+              </div>
+
+            </div>
+
+            <div class="modal-footer" style="padding: 0.85rem 1.25rem; border-top: 1px solid var(--border-color); background: var(--bg-primary); display: flex; justify-content: space-between;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-success" style="font-weight: 600;">
+                <i class="fas fa-check"></i> Save Resolution & Close Ticket
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  function handleResolveTicketSubmit(e, ticketId) {
+    e.preventDefault();
+    const ticket = state.complaints.find(c => c.Ticket_ID === ticketId);
+    if (!ticket) return;
+
+    ticket.Status = document.getElementById("res-status").value;
+    ticket.Root_Cause = document.getElementById("res-root-cause").value.trim();
+    ticket.Resolution_Notes = document.getElementById("res-notes").value.trim();
+    ticket.Spare_Parts_Used = document.getElementById("res-parts").value.trim();
+    ticket.Rating = document.getElementById("res-rating").value;
+    ticket.Resolved_At = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    showToast(`Ticket ${ticketId} updated to ${ticket.Status}!`, "success");
+    closeModal();
+    renderComplaints(document.getElementById("app-content"));
+  }
+
+
+  /**
+   * 5. VIEW TICKET DETAILS & AUDIT BREAKDOWN MODAL
+   */
+  function openTicketDetailsModal(ticketId) {
+    const ticket = state.complaints.find(c => c.Ticket_ID === ticketId);
+    if (!ticket) return;
+
+    const client = state.clients.find(c => c.Client_ID === ticket.Client_ID);
+    const clientName = client ? client.Client_Name : ticket.Client_ID;
+    const isService = ticket.Type === "SERVICE";
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container modal-lg" style="max-width: 740px; max-height: 90vh; display: flex; flex-direction: column;">
+          <div class="modal-header" style="background: var(--bg-primary); border-bottom: 1px solid var(--border-color);">
+            <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+              <i class="fas ${isService ? 'fa-wrench' : 'fa-exclamation-circle'}" style="color: ${isService ? '#0284c7' : '#dc2626'};"></i>
+              ${isService ? 'Service Request Details' : 'Customer Complaint Details'} (${ticket.Ticket_ID})
+            </h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;">
+            
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 1rem;">
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 6px;">
+                <div style="font-size: 0.725rem; color: var(--text-muted); text-transform: uppercase;">Client / Account</div>
+                <div style="font-weight: 700; font-size: 0.9rem; margin-top: 2px;">${clientName}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">${client ? (client.City_Area || 'HQ') : ''}</div>
+              </div>
+
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 6px;">
+                <div style="font-size: 0.725rem; color: var(--text-muted); text-transform: uppercase;">Ticket Category</div>
+                <div style="font-weight: 700; font-size: 0.9rem; margin-top: 2px;">${ticket.Category || 'General'}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Priority: <strong>${ticket.Priority || 'MEDIUM'}</strong></div>
+              </div>
+
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 6px;">
+                <div style="font-size: 0.725rem; color: var(--text-muted); text-transform: uppercase;">Status & Staff</div>
+                <div style="font-weight: 700; font-size: 0.9rem; margin-top: 2px;">${ticket.Status}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Eng: ${getUserName(ticket.Assigned_To_User_ID)}</div>
+              </div>
+            </div>
+
+            
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 12px 14px; border-radius: 8px; margin-bottom: 1rem;">
+              <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main); margin-bottom: 6px;">
+                ${ticket.Title || ticket.Issue_Details || 'Issue Summary'}
+              </div>
+              <div style="font-size: 0.85rem; color: var(--text-main); line-height: 1.5; white-space: pre-wrap;">
+                ${ticket.Issue_Details || 'No additional notes provided.'}
+              </div>
+              ${ticket.Product_Name ? `
+                <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
+                  📦 Equipment / SKU: <strong>${ticket.Product_Name}</strong>
+                </div>
+              ` : ''}
+              ${ticket.Site_Address ? `
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--text-muted);">
+                  📍 Site Address: <strong>${ticket.Site_Address}</strong>
+                </div>
+              ` : ''}
+            </div>
+
+            
+            ${ticket.Resolution_Notes ? `
+              <div style="background: rgba(22, 163, 74, 0.08); border: 1px solid rgba(22, 163, 74, 0.25); padding: 12px 14px; border-radius: 8px; margin-bottom: 1rem;">
+                <div style="font-weight: 700; font-size: 0.9rem; color: var(--success); margin-bottom: 6px;">
+                  <i class="fas fa-check-circle"></i> Work Done & Resolution Report
+                </div>
+                ${ticket.Root_Cause ? `<div style="font-size: 0.8rem; margin-bottom: 4px;"><strong>Root Cause:</strong> ${ticket.Root_Cause}</div>` : ''}
+                <div style="font-size: 0.85rem; color: var(--text-main); line-height: 1.5;">${ticket.Resolution_Notes}</div>
+                ${ticket.Spare_Parts_Used ? `<div style="font-size: 0.8rem; margin-top: 6px; color: var(--text-muted);">⚙️ Parts Used: <strong>${ticket.Spare_Parts_Used}</strong></div>` : ''}
+                ${ticket.Rating ? `<div style="font-size: 0.8rem; margin-top: 4px;">Rating: <strong>${ticket.Rating}</strong></div>` : ''}
+                <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 6px;">Resolved At: ${ticket.Resolved_At || 'Completed'}</div>
+              </div>
+            ` : ''}
+
+            
+            ${ticket.Attachment ? `
+              <div style="padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <strong><i class="fas fa-paperclip"></i> Attached Document / Photo</strong>
+                  <div style="font-size: 0.75rem; color: var(--text-muted);">Inspection photo or work order</div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('TICKET', '${ticket.Ticket_ID}')">
+                  <i class="fas fa-eye"></i> View Attachment
+                </button>
+              </div>
+            ` : ''}
+
+          </div>
+
+          <div class="modal-footer" style="padding: 0.85rem 1.25rem; border-top: 1px solid var(--border-color); background: var(--bg-primary); display: flex; justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-secondary" onclick="scheduleTicketSiteVisit('${ticket.Ticket_ID}')" style="color: var(--primary); font-weight: 600;">
+                <i class="fas fa-map-marker-alt"></i> Dispatch Site Visit
+              </button>
+              <button type="button" class="btn btn-success" onclick="openResolveTicketModal('${ticket.Ticket_ID}')">
+                <i class="fas fa-check"></i> Update / Resolve
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+
+  /**
+   * 6. INTEGRATED SITE VISIT DISPATCH FROM TICKET
+   */
+  function scheduleTicketSiteVisit(ticketId) {
+    const ticket = state.complaints.find(c => c.Ticket_ID === ticketId);
+    if (!ticket) return;
+
+    closeModal();
+    // Open Check-In modal pre-populated with client, purpose, and linked ticket notes
+    openNewVisitModal(ticket.Client_ID, "Service / Complaint", `Linked Ticket #${ticket.Ticket_ID}: ${ticket.Title || ticket.Category}`);
+  }
+
+
+  /**
+   * 7. WHATSAPP & EMAIL COMMS DISPATCH FOR TICKETS
+   */
+  function sendTicketComms(ticketId) {
+    const ticket = state.complaints.find(c => c.Ticket_ID === ticketId);
+    if (!ticket) return;
+
+    const client = state.clients.find(c => c.Client_ID === ticket.Client_ID);
+    const clientName = client ? client.Client_Name : ticket.Client_ID;
+    const clientPhone = client ? (client.Phone || "") : "";
+    const clientEmail = client ? (client.Email || "") : "";
+    const engineerName = getUserName(ticket.Assigned_To_User_ID);
+    const isService = ticket.Type === "SERVICE";
+
+    const subject = `${isService ? 'Field Service Update' : 'Complaint Update'}: Ticket #${ticket.Ticket_ID} - ${clientName}`;
+    const message = `Hello ${clientName},\n\nThis is an update from Nexallot Operations regarding your ${isService ? 'Service Request' : 'Customer Complaint'} (Ticket #${ticket.Ticket_ID}).\n\n📌 Category: ${ticket.Category}\n📌 Summary: ${ticket.Title || ticket.Issue_Details}\n📌 Status: ${ticket.Status}\n📌 Assigned Service Engineer: ${engineerName}\n\nOur team is committed to providing prompt support. If you have any questions, feel free to reply directly.\n\nThank you,\nNexallot Field Operations\n(Powered by NexSolve Training & Consulting)`;
+
+    document.getElementById("comms-modal-title").innerHTML = `<i class="fas fa-paper-plane" style="color: var(--primary);"></i> Share Ticket #${ticket.Ticket_ID} Update`;
+    document.getElementById("comms-subject-input").value = subject;
+    document.getElementById("comms-text-area").value = message;
+    document.getElementById("comms-recipient-name").textContent = clientName;
+    document.getElementById("comms-recipient-details").textContent = `${clientPhone ? '📞 ' + clientPhone : ''} ${clientEmail ? '✉ ' + clientEmail : ''}`.trim() || 'No direct phone';
+
+    window.currentCommsPayload = {
+      phone: clientPhone,
+      email: clientEmail,
+      subject: subject,
+      message: message
+    };
+
+    const commsModal = document.getElementById("comms-share-modal");
+    if (commsModal) commsModal.classList.add("show");
+  }
+
+// Global Exports
+window.renderComplaints = typeof renderComplaints !== 'undefined' ? renderComplaints : undefined;
+window.getFilteredTicketsList = typeof getFilteredTicketsList !== 'undefined' ? getFilteredTicketsList : undefined;
+window.filterTicketsTable = typeof filterTicketsTable !== 'undefined' ? filterTicketsTable : undefined;
+window.setTicketCategoryFilter = typeof setTicketCategoryFilter !== 'undefined' ? setTicketCategoryFilter : undefined;
+window.renderTicketRows = typeof renderTicketRows !== 'undefined' ? renderTicketRows : undefined;
+window.openNewComplaintModal = typeof openNewComplaintModal !== 'undefined' ? openNewComplaintModal : undefined;
+window.handleComplaintClientSearch = typeof handleComplaintClientSearch !== 'undefined' ? handleComplaintClientSearch : undefined;
+window.selectComplaintClient = typeof selectComplaintClient !== 'undefined' ? selectComplaintClient : undefined;
+window.handleComplaintSubmit = typeof handleComplaintSubmit !== 'undefined' ? handleComplaintSubmit : undefined;
+window.openNewServiceModal = typeof openNewServiceModal !== 'undefined' ? openNewServiceModal : undefined;
+window.handleServiceClientSearch = typeof handleServiceClientSearch !== 'undefined' ? handleServiceClientSearch : undefined;
+window.selectServiceClient = typeof selectServiceClient !== 'undefined' ? selectServiceClient : undefined;
+window.handleServiceSubmit = typeof handleServiceSubmit !== 'undefined' ? handleServiceSubmit : undefined;
+window.openResolveTicketModal = typeof openResolveTicketModal !== 'undefined' ? openResolveTicketModal : undefined;
+window.handleResolveTicketSubmit = typeof handleResolveTicketSubmit !== 'undefined' ? handleResolveTicketSubmit : undefined;
+window.openTicketDetailsModal = typeof openTicketDetailsModal !== 'undefined' ? openTicketDetailsModal : undefined;
+window.scheduleTicketSiteVisit = typeof scheduleTicketSiteVisit !== 'undefined' ? scheduleTicketSiteVisit : undefined;
+window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComms : undefined;
 </script>
   <script>
 /**
@@ -6649,18 +7788,39 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
   window.scheduleTicketSiteVisit = scheduleTicketSiteVisit;
   window.sendTicketComms = sendTicketComms;
 </script>
-  <script>
+  <style>
+.nav-subtab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 14px;
+    font-size: 0.825rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-subtab:hover {
+    color: var(--primary);
+  }
+  .nav-subtab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    background: var(--bg-secondary);
+  }
+</style>
+<script>
 /**
    * =========================================================================
    * CLIENT DIRECTORY STATE & HELPERS
    * =========================================================================
    */
-  let clientDirectoryFilter = "ALL";
-  let clientDirectorySort = "NAME_ASC";
-  let clientDirectorySearch = "";
+  window.window.clientDirectoryFilter = window.window.clientDirectoryFilter || "ALL";
+  window.window.clientDirectorySort = window.window.clientDirectorySort || "NAME_ASC";
+  window.window.clientDirectorySearch = window.window.clientDirectorySearch || "";
 
   function getClientFilteredList() {
-    const q = (clientDirectorySearch || "").toLowerCase().trim();
+    const q = (window.clientDirectorySearch || "").toLowerCase().trim();
     let list = state.clients.filter(c => {
       const matchSearch = !q ||
         (c.Client_Name && c.Client_Name.toLowerCase().includes(q)) ||
@@ -6673,22 +7833,22 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
 
       if (!matchSearch) return false;
 
-      if (clientDirectoryFilter === "ACTIVE") return (c.Status || "ACTIVE") === "ACTIVE";
-      if (clientDirectoryFilter === "PROSPECT") return (c.Status || "").includes("PROSPECT") || (c.Status || "").includes("LEAD");
-      if (clientDirectoryFilter === "DUE") return Number(c.Outstanding_Balance || 0) > 0;
-      if (clientDirectoryFilter === "GEOTAGGED") return Boolean(c.GPS_Location && c.GPS_Location.trim() !== "");
+      if (window.clientDirectoryFilter === "ACTIVE") return (c.Status || "ACTIVE") === "ACTIVE";
+      if (window.clientDirectoryFilter === "PROSPECT") return (c.Status || "").includes("PROSPECT") || (c.Status || "").includes("LEAD");
+      if (window.clientDirectoryFilter === "DUE") return Number(c.Outstanding_Balance || 0) > 0;
+      if (window.clientDirectoryFilter === "GEOTAGGED") return Boolean(c.GPS_Location && c.GPS_Location.trim() !== "");
       
       return true;
     });
 
     // Sorting
-    if (clientDirectorySort === "NAME_ASC") {
+    if (window.clientDirectorySort === "NAME_ASC") {
       list.sort((a, b) => (a.Client_Name || "").localeCompare(b.Client_Name || ""));
-    } else if (clientDirectorySort === "NAME_DESC") {
+    } else if (window.clientDirectorySort === "NAME_DESC") {
       list.sort((a, b) => (b.Client_Name || "").localeCompare(a.Client_Name || ""));
-    } else if (clientDirectorySort === "DUE_DESC") {
+    } else if (window.clientDirectorySort === "DUE_DESC") {
       list.sort((a, b) => Number(b.Outstanding_Balance || 0) - Number(a.Outstanding_Balance || 0));
-    } else if (clientDirectorySort === "CREDIT_DESC") {
+    } else if (window.clientDirectorySort === "CREDIT_DESC") {
       list.sort((a, b) => Number(b.Credit_Limit || 0) - Number(a.Credit_Limit || 0));
     }
 
@@ -6716,7 +7876,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
       const geotaggedCount = allClients.filter(c => c && c.GPS_Location && String(c.GPS_Location).trim() !== "").length;
 
     container.innerHTML = `
-      <!-- Top Metrics Dashboard Ribbon -->
+      
       <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
         <div class="stat-card">
           <div class="stat-label"><i class="fas fa-building" style="color: var(--primary);"></i> Total Accounts</div>
@@ -6740,7 +7900,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         </div>
       </div>
 
-      <!-- Action Bar & Controls -->
+      
       <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 8px;">
         <button type="button" class="btn btn-secondary" onclick="exportClientsCSV()" title="Export Clients to CSV">
           <i class="fas fa-file-csv"></i> Export CSV
@@ -6750,43 +7910,43 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
         </button>
       </div>
 
-      <!-- Filter Tabs & In-Place Search Bar -->
+      
       <div class="tab-filter-bar" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
         
-        <!-- Search Input -->
+        
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 380px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" id="client-table-search-input" class="form-control" placeholder="Search by Client Name, Phone, Contact Person, GSTIN, City..." value="${clientDirectorySearch}" oninput="filterClientsTable(this.value)">
-          ${clientDirectorySearch ? `<button type="button" class="btn btn-secondary btn-sm" onclick="filterClientsTable('')"><i class="fas fa-times"></i></button>` : ''}
+          <input type="text" id="client-table-search-input" class="form-control" placeholder="Search by Client Name, Phone, Contact Person, GSTIN, City..." value="${window.clientDirectorySearch}" oninput="filterClientsTable(this.value)">
+          ${window.clientDirectorySearch ? `<button type="button" class="btn btn-secondary btn-sm" onclick="filterClientsTable('')"><i class="fas fa-times"></i></button>` : ''}
         </div>
 
-        <!-- Filter Pills -->
+        
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-          <button type="button" class="btn btn-sm ${clientDirectoryFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('ALL')">All (${allClients.length})</button>
-          <button type="button" class="btn btn-sm ${clientDirectoryFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('ACTIVE')">Active (${totalActive})</button>
-          <button type="button" class="btn btn-sm ${clientDirectoryFilter === 'DUE' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('DUE')">Due Balance</button>
-          <button type="button" class="btn btn-sm ${clientDirectoryFilter === 'PROSPECT' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('PROSPECT')">Leads / Prospects</button>
-          <button type="button" class="btn btn-sm ${clientDirectoryFilter === 'GEOTAGGED' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('GEOTAGGED')">📍 Geotagged</button>
+          <button type="button" class="btn btn-sm ${window.clientDirectoryFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('ALL')">All (${allClients.length})</button>
+          <button type="button" class="btn btn-sm ${window.clientDirectoryFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('ACTIVE')">Active (${totalActive})</button>
+          <button type="button" class="btn btn-sm ${window.clientDirectoryFilter === 'DUE' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('DUE')">Due Balance</button>
+          <button type="button" class="btn btn-sm ${window.clientDirectoryFilter === 'PROSPECT' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('PROSPECT')">Leads / Prospects</button>
+          <button type="button" class="btn btn-sm ${window.clientDirectoryFilter === 'GEOTAGGED' ? 'btn-primary' : 'btn-secondary'}" onclick="setClientFilter('GEOTAGGED')">📍 Geotagged</button>
         </div>
 
-        <!-- Sort Selector -->
+        
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 0.775rem; color: var(--text-muted); font-weight: 600;">Sort:</span>
           <select class="form-control form-control-sm" style="width: auto; font-size: 0.8rem;" onchange="setClientSort(this.value)">
-            <option value="NAME_ASC" ${clientDirectorySort === 'NAME_ASC' ? 'selected' : ''}>Name (A to Z)</option>
-            <option value="NAME_DESC" ${clientDirectorySort === 'NAME_DESC' ? 'selected' : ''}>Name (Z to A)</option>
-            <option value="DUE_DESC" ${clientDirectorySort === 'DUE_DESC' ? 'selected' : ''}>Outstanding (High to Low)</option>
-            <option value="CREDIT_DESC" ${clientDirectorySort === 'CREDIT_DESC' ? 'selected' : ''}>Credit Limit (High to Low)</option>
+            <option value="NAME_ASC" ${window.clientDirectorySort === 'NAME_ASC' ? 'selected' : ''}>Name (A to Z)</option>
+            <option value="NAME_DESC" ${window.clientDirectorySort === 'NAME_DESC' ? 'selected' : ''}>Name (Z to A)</option>
+            <option value="DUE_DESC" ${window.clientDirectorySort === 'DUE_DESC' ? 'selected' : ''}>Outstanding (High to Low)</option>
+            <option value="CREDIT_DESC" ${window.clientDirectorySort === 'CREDIT_DESC' ? 'selected' : ''}>Credit Limit (High to Low)</option>
           </select>
         </div>
       </div>
 
-      <!-- Count Showing -->
+      
       <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
         Showing <strong id="clients-showing-count">${filtered.length}</strong> of ${allClients.length} accounts
       </div>
 
-      <!-- Clients Directory Table -->
+      
       <div class="table-wrapper">
         <table class="data-table">
           <thead>
@@ -6815,7 +7975,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
   }
 
   function filterClientsTable(query) {
-    clientDirectorySearch = query;
+    window.clientDirectorySearch = query;
     const filtered = getClientFilteredList();
     const tbody = document.getElementById("clients-table-tbody");
     const countEl = document.getElementById("clients-showing-count");
@@ -6824,12 +7984,12 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
   }
 
   function setClientFilter(filterType) {
-    clientDirectoryFilter = filterType;
+    window.clientDirectoryFilter = filterType;
     renderClients(document.getElementById("app-content"));
   }
 
   function setClientSort(sortType) {
-    clientDirectorySort = sortType;
+    window.clientDirectorySort = sortType;
     renderClients(document.getElementById("app-content"));
   }
 
@@ -6851,7 +8011,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
 
       return `
         <tr>
-          <!-- Client ID & Name -->
+          
           <td>
             <div style="display: flex; flex-direction: column;">
               <span style="font-weight: 700; font-size: 0.925rem; color: var(--text-main); cursor: pointer;" onclick="openClientProfileModal('${c.Client_ID}')" title="View 360° Profile">
@@ -6864,13 +8024,13 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
             </div>
           </td>
 
-          <!-- Contact Person -->
+          
           <td>
             <div style="font-weight: 600; font-size: 0.85rem;">${c.Contact_Person || '-'}</div>
             <div style="font-size: 0.75rem; color: var(--text-muted);">${c.Contact_Designation || 'Proprietor'}</div>
           </td>
 
-          <!-- Phone & Comms -->
+          
           <td>
             <div style="display: flex; align-items: center; gap: 6px;">
               <strong style="font-size: 0.85rem;">${c.Phone || '-'}</strong>
@@ -6886,7 +8046,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
             ${c.Email ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${c.Email}</div>` : ''}
           </td>
 
-          <!-- Territory / City -->
+          
           <td>
             <div style="font-weight: 600; font-size: 0.825rem;">${c.City_Area || '-'}</div>
             <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 4px;">
@@ -6898,12 +8058,12 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
             </div>
           </td>
 
-          <!-- Assigned Executive -->
+          
           <td>
             <span style="font-size: 0.825rem; font-weight: 500;">${getUserName(c.Assigned_User_ID)}</span>
           </td>
 
-          <!-- Credit Limit & Outstanding Due -->
+          
           <td style="min-width: 140px;">
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
               <strong style="color: ${balance > 0 ? 'var(--danger)' : 'var(--success)'}; font-size: 0.875rem;">
@@ -6918,49 +8078,49 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
             ` : ''}
           </td>
 
-          <!-- GSTIN -->
+          
           <td>
             <span style="font-family: monospace; font-size: 0.775rem; background: var(--bg-primary); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border-color);">
               ${c.GSTIN || 'UNREGISTERED'}
             </span>
           </td>
 
-          <!-- Status -->
+          
           <td>
             <span class="badge ${statusBadge}">${status}</span>
           </td>
 
-          <!-- Actions -->
+          
           <td>
             <div style="display: flex; gap: 4px; align-items: center;">
-              <!-- 360 Profile -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="openClientProfileModal('${c.Client_ID}')" title="360° Customer Ledger & Profile">
                 <i class="fas fa-eye"></i>
               </button>
 
-              <!-- Edit Account -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="openClientModal('${c.Client_ID}')" title="Edit Client Account">
                 <i class="fas fa-edit"></i>
               </button>
 
-              <!-- Field Visit Check-In -->
+              
               ${!state.activeVisit ? `
                 <button type="button" class="btn btn-secondary btn-sm" onclick="openNewVisitModal('${c.Client_ID}')" title="Check-In at Client Site" style="color: var(--primary);">
                   <i class="fas fa-map-marker-alt"></i>
                 </button>
               ` : ''}
 
-              <!-- Book Sales Order -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${c.Client_ID}')" title="Book Order for this Client">
                 <i class="fas fa-shopping-cart"></i>
               </button>
 
-              <!-- Collect Payment -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${c.Client_ID}')" title="Collect Payment">
                 <i class="fas fa-wallet"></i>
               </button>
 
-              <!-- Send Statement via WhatsApp/Email -->
+              
               <button type="button" class="btn btn-secondary btn-sm" onclick="sendClientComms('${c.Client_ID}')" title="Share Ledger / Balance Reminder via WhatsApp / Email">
                 <i class="fas fa-paper-plane"></i>
               </button>
@@ -7005,7 +8165,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
             
             <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;">
               
-              <!-- Section 1: Basic Business Profile -->
+              
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                 <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
                   <i class="fas fa-briefcase"></i> 1. Business & Account Information
@@ -7048,7 +8208,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Section 2: Contact Person & Communication -->
+              
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                 <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
                   <i class="fas fa-user-tie"></i> 2. Key Contact Person & Comms
@@ -7081,7 +8241,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Section 3: Billing, Tax & Credit Terms -->
+              
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                 <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
                   <i class="fas fa-file-invoice-dollar"></i> 3. Tax, Billing & Credit Terms
@@ -7122,7 +8282,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Section 4: Site Address & Live Geotagging -->
+              
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                   <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--primary); margin: 0; display: flex; align-items: center; gap: 6px;">
@@ -7158,7 +8318,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                 </div>
               </div>
 
-              <!-- Section 5: Visiting Preference, Remarks & Documents -->
+              
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                 <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
                   <i class="fas fa-paperclip"></i> 5. Visiting Preference & Attachment
@@ -7180,7 +8340,7 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
                   </div>
                 </div>
 
-                <!-- Attachment Proof (Visiting card / shop front) -->
+                
                 <div class="form-group" style="margin: 0;">
                   <label class="form-label"><i class="fas fa-camera"></i> Shop Front / Visiting Card / GST Certificate</label>
                   <div class="attachment-preview-box" onclick="document.getElementById('cl-file-input').click()">
@@ -7297,6 +8457,9 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
       closeModal();
       renderView(state.currentView);
       showToast(`Client ${client.Client_Name} updated successfully!`, "success");
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_client', client);
+      }
     } else {
       const newClient = {
         Client_ID: "CUST-" + (1000 + state.clients.length + 1),
@@ -7331,19 +8494,410 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
       closeModal();
       renderView(state.currentView);
       showToast(`New client ${newClient.Client_Name} created successfully!`, "success");
+
+      // Asynchronously sync with Google Sheets Database
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_client', newClient);
+      }
     }
   }
 
+  /**
+   * =========================================================================
+   * 3. 360° CLIENT LEDGER & PROFILE MODAL
+   * =========================================================================
+   */
+  window.window.clientProfileActiveTab = window.window.clientProfileActiveTab || "OVERVIEW";
 
-  window.renderClients = renderClients;
-  window.openClientModal = openClientModal;
-  window.handleClientSubmit = handleClientSubmit;
-  window.captureLiveGpsForClient = captureLiveGpsForClient;
-  window.filterClientsTable = filterClientsTable;
-  window.setClientFilter = setClientFilter;
-  window.setClientSort = setClientSort;
-  // exportClientsCSV is in Clients_Profile_JS.html
-    </script>
+  function openClientProfileModal(clientId) {
+    const client = state.clients.find(c => c.Client_ID === clientId);
+    if (!client) return;
+
+    // Filter linked records
+    const orders = state.orders.filter(o => o.Client_ID === clientId);
+    const visits = state.visits.filter(v => v.Client_ID === clientId);
+    const payments = state.payments.filter(p => p.Client_ID === clientId);
+    const complaints = state.complaints.filter(t => t.Client_ID === clientId);
+
+    const balance = Number(client.Outstanding_Balance || 0);
+    const creditLimit = Number(client.Credit_Limit || 0);
+    const totalOrdered = orders.reduce((sum, o) => sum + Number(o.Total_Amount || 0), 0);
+    const totalCollected = payments.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container modal-lg" style="max-width: 920px; width: 95vw; max-height: 92vh; display: flex; flex-direction: column;">
+          
+          
+          <div class="modal-header" style="background: var(--bg-primary); border-bottom: 1px solid var(--border-color); padding: 1rem 1.25rem;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h3 class="modal-title" style="margin: 0; font-size: 1.2rem;">${client.Client_Name}</h3>
+                <span class="badge ${client.Status === 'ACTIVE' ? 'badge-active' : 'badge-pending'}">${client.Status || 'ACTIVE'}</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">
+                <span>ID: <strong>${client.Client_ID}</strong></span> • 
+                <span>Type: <strong>${client.Account_Type || 'Retailer / Shop'}</strong></span> • 
+                <span>Zone: <strong>${client.City_Area}</strong></span> • 
+                <span>Assigned to: <strong>${getUserName(client.Assigned_User_ID)}</strong></span>
+              </div>
+            </div>
+            
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openClientModal('${client.Client_ID}')" title="Edit Profile"><i class="fas fa-edit"></i> Edit</button>
+              <button class="icon-btn" onclick="closeModal()" style="background:none; border:none; font-size:1.25rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+            </div>
+          </div>
+
+          
+          <div style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); padding: 8px 1.25rem; display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; align-items: center;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              ${!state.activeVisit ? `
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal(); openNewVisitModal('${client.Client_ID}')" style="color: var(--primary); font-weight: 600;">
+                  <i class="fas fa-map-marker-alt"></i> Check-In Visit
+                </button>
+              ` : ''}
+              <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal(); openNewOrderModal('${client.Client_ID}')">
+                <i class="fas fa-cart-plus"></i> Book Order
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal(); openNewPaymentModal('${client.Client_ID}')">
+                <i class="fas fa-wallet"></i> Collect Payment
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal(); openNewComplaintModal(); setTimeout(()=>{ selectComplaintClient('${client.Client_ID}', '${client.Client_Name.replace(/'/g, "\\'")}', '${client.Phone || ''}', '${(client.Address_Line || '').replace(/'/g, "\\'")}'); }, 150);">
+                <i class="fas fa-exclamation-triangle"></i> Log Complaint
+              </button>
+            </div>
+
+            <div style="display: flex; gap: 6px;">
+              <button type="button" class="btn btn-success btn-sm" onclick="triggerDirectClientWhatsApp('${client.Client_ID}')">
+                <i class="fab fa-whatsapp"></i> WhatsApp
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="sendClientComms('${client.Client_ID}')">
+                <i class="fas fa-envelope"></i> Send Statement
+              </button>
+            </div>
+          </div>
+
+          
+          <div style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-primary); padding: 0 1.25rem;">
+            <button type="button" class="nav-subtab ${window.clientProfileActiveTab === 'OVERVIEW' ? 'active' : ''}" onclick="switchClientProfileTab('${client.Client_ID}', 'OVERVIEW')">Overview & Credit</button>
+            <button type="button" class="nav-subtab ${window.clientProfileActiveTab === 'ORDERS' ? 'active' : ''}" onclick="switchClientProfileTab('${client.Client_ID}', 'ORDERS')">Orders (${orders.length})</button>
+            <button type="button" class="nav-subtab ${window.clientProfileActiveTab === 'VISITS' ? 'active' : ''}" onclick="switchClientProfileTab('${client.Client_ID}', 'VISITS')">Visits Log (${visits.length})</button>
+            <button type="button" class="nav-subtab ${window.clientProfileActiveTab === 'PAYMENTS' ? 'active' : ''}" onclick="switchClientProfileTab('${client.Client_ID}', 'PAYMENTS')">Payments (${payments.length})</button>
+            <button type="button" class="nav-subtab ${window.clientProfileActiveTab === 'TICKETS' ? 'active' : ''}" onclick="switchClientProfileTab('${client.Client_ID}', 'TICKETS')">Service / Complaints (${complaints.length})</button>
+          </div>
+
+          
+          <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;" id="client-profile-tab-content">
+            ${renderClientProfileTabContent(client, window.clientProfileActiveTab, { orders, visits, payments, complaints, totalOrdered, totalCollected })}
+          </div>
+
+          <div class="modal-footer" style="padding: 0.75rem 1.25rem; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  function switchClientProfileTab(clientId, tabName) {
+    window.clientProfileActiveTab = tabName;
+    openClientProfileModal(clientId);
+  }
+
+  function renderClientProfileTabContent(client, tabName, data) {
+    if (tabName === "OVERVIEW") {
+      const balance = Number(client.Outstanding_Balance || 0);
+      const creditLimit = Number(client.Credit_Limit || 0);
+      const hasGps = client.GPS_Location && client.GPS_Location.trim() !== "";
+
+      return `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          
+          
+          <div class="card" style="padding: 1rem; border: 1px solid var(--border-color); background: var(--bg-primary);">
+            <h4 style="font-size: 0.9rem; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+              <i class="fas fa-wallet"></i> Credit & Commercial Ledger
+            </h4>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 6px;">
+                <span style="color: var(--text-muted);">Current Outstanding Due:</span>
+                <strong style="color: ${balance > 0 ? 'var(--danger)' : 'var(--success)'}; font-size: 1rem;">₹${balance.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 6px;">
+                <span style="color: var(--text-muted);">Sanctioned Credit Limit:</span>
+                <strong>₹${creditLimit.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 6px;">
+                <span style="color: var(--text-muted);">Payment Terms:</span>
+                <span class="badge badge-on-hold">${client.Payment_Terms || 'Net 30 Days'}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 6px;">
+                <span style="color: var(--text-muted);">Price Tier:</span>
+                <span>${client.Price_Tier || 'Tier A (Distributor Price)'}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 6px;">
+                <span style="color: var(--text-muted);">Lifetime Sales Value:</span>
+                <strong style="color: var(--primary);">₹${data.totalOrdered.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-muted);">Total Payments Received:</span>
+                <strong style="color: var(--success);">₹${data.totalCollected.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+
+          
+          <div class="card" style="padding: 1rem; border: 1px solid var(--border-color); background: var(--bg-primary);">
+            <h4 style="font-size: 0.9rem; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+              <i class="fas fa-id-card"></i> Contact, Tax & Site Details
+            </h4>
+
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">Contact Person:</span>
+                <div style="font-weight: 600;">${client.Contact_Person || '-'} (${client.Contact_Designation || 'Proprietor'})</div>
+              </div>
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">Phone & WhatsApp:</span>
+                <div><strong>${client.Phone || '-'}</strong> ${client.Alternate_Phone ? ` / ${client.Alternate_Phone}` : ''}</div>
+              </div>
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">Official Email:</span>
+                <div>${client.Email || '-'}</div>
+              </div>
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">Tax Identifiers:</span>
+                <div>GSTIN: <strong style="font-family: monospace;">${client.GSTIN || 'UNREGISTERED'}</strong> • PAN: <strong style="font-family: monospace;">${client.PAN || '-'}</strong></div>
+              </div>
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">Site Address:</span>
+                <div>${client.Address_Line || '-'}, ${client.City_Area}, ${client.State_Name || 'Gujarat'} - ${client.Pincode || ''}</div>
+              </div>
+              <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">GPS Geotag:</span>
+                <div>
+                  ${hasGps ? `
+                    <a href="https://maps.google.com/?q=${encodeURIComponent(client.GPS_Location)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="margin-top: 4px; color: var(--primary); font-size: 0.75rem;">
+                      📍 View on Google Maps (${client.GPS_Location})
+                    </a>
+                  ` : '<span style="color: var(--text-muted); font-size: 0.8rem;">No GPS coordinates registered.</span>'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        
+        ${client.Attachment || client.Notes ? `
+          <div style="margin-top: 1rem; background: var(--bg-primary); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">VISITING NOTES & PREFERENCE:</div>
+              <div style="font-size: 0.85rem; margin-top: 2px;">${client.Notes || 'Regular field support'} (${client.Visit_Frequency || 'Weekly'})</div>
+            </div>
+            ${client.Attachment ? `
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('CLIENT', '${client.Client_ID}', 'Shop / Visiting Card Proof')">
+                <i class="fas fa-paperclip"></i> View Attached Shop Photo
+              </button>
+            ` : ''}
+          </div>
+        ` : ''}
+      `;
+    }
+
+    if (tabName === "ORDERS") {
+      if (data.orders.length === 0) return `<div style="text-align:center; padding: 2rem; color:var(--text-muted);">No sales orders booked for this client yet.</div>`;
+      return `
+        <table class="data-table">
+          <thead>
+            <tr><th>Order ID</th><th>Date</th><th>Items Count</th><th>Total Amount</th><th>Payment Status</th><th>Delivery</th></tr>
+          </thead>
+          <tbody>
+            ${data.orders.map(o => `
+              <tr>
+                <td><strong>${o.Order_ID}</strong></td>
+                <td>${o.Date}</td>
+                <td>${(o.Items || []).length} items</td>
+                <td><strong>₹${Number(o.Total_Amount).toLocaleString()}</strong></td>
+                <td><span class="badge ${Number(o.Paid_Amount) >= Number(o.Total_Amount) ? 'badge-active' : 'badge-pending'}">${Number(o.Paid_Amount) >= Number(o.Total_Amount) ? '100% Paid' : 'Due: ₹' + (Number(o.Total_Amount) - Number(o.Paid_Amount)).toLocaleString()}</span></td>
+                <td><span class="badge badge-on-hold">${o.Delivery_Status}</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    if (tabName === "VISITS") {
+      if (data.visits.length === 0) return `<div style="text-align:center; padding: 2rem; color:var(--text-muted);">No field visits recorded for this client yet.</div>`;
+      return `
+        <table class="data-table">
+          <thead>
+            <tr><th>Visit ID</th><th>Date</th><th>Executive</th><th>Purpose</th><th>Time Spent</th><th>Outcome / Notes</th></tr>
+          </thead>
+          <tbody>
+            ${data.visits.map(v => `
+              <tr>
+                <td><strong>${v.Visit_ID}</strong></td>
+                <td>${v.Date}</td>
+                <td>${getUserName(v.User_ID)}</td>
+                <td><span class="badge badge-on-hold">${v.Purpose || 'Routine'}</span></td>
+                <td>${v.Time_Spent_Mins ? v.Time_Spent_Mins + ' mins' : '-'}</td>
+                <td><small>${v.Notes || '-'}</small></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    if (tabName === "PAYMENTS") {
+      if (data.payments.length === 0) return `<div style="text-align:center; padding: 2rem; color:var(--text-muted);">No payment collections recorded for this client yet.</div>`;
+      return `
+        <table class="data-table">
+          <thead>
+            <tr><th>Receipt ID</th><th>Date</th><th>Amount</th><th>Mode</th><th>Ref / Cheque</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${data.payments.map(p => `
+              <tr>
+                <td><strong>${p.Payment_ID}</strong></td>
+                <td>${p.Date}</td>
+                <td><strong style="color: var(--success);">₹${Number(p.Amount).toLocaleString()}</strong></td>
+                <td><span class="badge badge-on-hold">${p.Payment_Mode}</span></td>
+                <td>${p.Ref_Cheque_No || '-'}</td>
+                <td><span class="badge badge-active">${p.Status}</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    if (tabName === "TICKETS") {
+      if (data.complaints.length === 0) return `<div style="text-align:center; padding: 2rem; color:var(--text-muted);">No complaints or service requests for this client.</div>`;
+      return `
+        <table class="data-table">
+          <thead>
+            <tr><th>Ticket ID</th><th>Type</th><th>Category</th><th>Priority</th><th>Title / Issue</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${data.complaints.map(t => `
+              <tr>
+                <td><strong>${t.Ticket_ID}</strong></td>
+                <td><span class="badge ${t.Type === 'SERVICE' ? 'badge-active' : 'badge-danger'}">${t.Type}</span></td>
+                <td>${t.Category}</td>
+                <td><span class="badge ${t.Priority === 'CRITICAL' ? 'badge-danger' : 'badge-on-hold'}">${t.Priority}</span></td>
+                <td>${t.Title || t.Issue_Details}</td>
+                <td><span class="badge ${t.Status === 'RESOLVED' ? 'badge-active' : 'badge-pending'}">${t.Status}</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    return "";
+  }
+
+  /**
+   * =========================================================================
+   * 4. DIRECT WHATSAPP & STATEMENT COMMS
+   * =========================================================================
+   */
+  function triggerDirectClientWhatsApp(clientId) {
+    const client = state.clients.find(c => c.Client_ID === clientId);
+    if (!client || !client.Phone) {
+      showToast("No mobile number on file for this client.", "warning");
+      return;
+    }
+
+    const cleanPhone = client.Phone.replace(/[^0-9]/g, '');
+    const phoneWithCountry = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
+    const balance = Number(client.Outstanding_Balance || 0);
+
+    const text = encodeURIComponent(`Hello ${client.Contact_Person || client.Client_Name},\n\nGreetings from ${state.company.name}!\n\nThis is regarding your account with us (Account ID: ${client.Client_ID}).\n${balance > 0 ? `📌 Current Outstanding Balance: ₹${balance.toLocaleString()}\n` : '📌 Your account is fully reconciled.\n'}\nFor any assistance with orders, deliveries, or service, feel free to contact us.\n\nWarm regards,\n${state.currentUser.Full_Name}\n${state.company.name}\nPowered by NexSolve Training & Consulting`);
+
+    window.open(`https://api.whatsapp.com/send?phone=${phoneWithCountry}&text=${text}`, '_blank');
+  }
+
+  function sendClientComms(clientId) {
+    const client = state.clients.find(c => c.Client_ID === clientId);
+    if (!client) return;
+
+    const balance = Number(client.Outstanding_Balance || 0);
+    const subject = `Account Statement & Ledger Summary - ${client.Client_Name}`;
+    const message = `Dear ${client.Contact_Person || client.Client_Name},\n\nWe appreciate your continued partnership with ${state.company.name}.\n\n*Account Summary (as of today):*\n• Client Code: ${client.Client_ID}\n• Company Name: ${client.Client_Name}\n• Credit Limit: ₹${Number(client.Credit_Limit || 0).toLocaleString()}\n• Payment Terms: ${client.Payment_Terms || 'Net 30 Days'}\n• Current Outstanding Balance Due: ₹${balance.toLocaleString()}\n\nKindly review and arrange payment settlement as per the agreed credit period.\n\nFor any queries or account statement details, please reach out directly.\n\nThank you,\n${state.currentUser.Full_Name}\n${state.company.name}\n(Powered by NexSolve Training & Consulting)`;
+
+    document.getElementById("comms-modal-title").innerHTML = `<i class="fas fa-paper-plane" style="color: var(--primary);"></i> Send Account Statement to ${client.Client_Name}`;
+    document.getElementById("comms-subject-input").value = subject;
+    document.getElementById("comms-text-area").value = message;
+    document.getElementById("comms-recipient-name").textContent = client.Client_Name;
+    document.getElementById("comms-recipient-details").textContent = `${client.Phone ? '📞 ' + client.Phone : ''} ${client.Email ? '✉ ' + client.Email : ''}`.trim() || 'No direct phone';
+
+    window.currentCommsPayload = {
+      phone: client.Phone || "",
+      email: client.Email || "",
+      subject: subject,
+      message: message
+    };
+
+    const commsModal = document.getElementById("comms-share-modal");
+    if (commsModal) commsModal.classList.add("show");
+  }
+
+  function exportClientsCSV() {
+    const headers = ["Client_ID", "Client_Name", "Account_Type", "Contact_Person", "Phone", "Email", "GSTIN", "PAN", "Credit_Limit", "Outstanding_Balance", "Payment_Terms", "City_Area", "State", "GPS_Location", "Assigned_User_ID", "Status"];
+    const rows = state.clients.map(c => [
+      `"${c.Client_ID || ''}"`,
+      `"${(c.Client_Name || '').replace(/"/g, '""')}"`,
+      `"${c.Account_Type || ''}"`,
+      `"${(c.Contact_Person || '').replace(/"/g, '""')}"`,
+      `"${c.Phone || ''}"`,
+      `"${c.Email || ''}"`,
+      `"${c.GSTIN || ''}"`,
+      `"${c.PAN || ''}"`,
+      c.Credit_Limit || 0,
+      c.Outstanding_Balance || 0,
+      `"${c.Payment_Terms || ''}"`,
+      `"${c.City_Area || ''}"`,
+      `"${c.State_Name || ''}"`,
+      `"${c.GPS_Location || ''}"`,
+      `"${c.Assigned_User_ID || ''}"`,
+      `"${c.Status || 'ACTIVE'}"`
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const dl = document.createElement('a');
+    dl.setAttribute('href', encodeURI(csvContent));
+    dl.setAttribute('download', `nexallot_clients_${new Date().toISOString().split('T')[0]}.csv`);
+    dl.click();
+    showToast("Client directory exported to CSV!", "success");
+  }
+
+// Global Exports
+window.getClientFilteredList = typeof getClientFilteredList !== 'undefined' ? getClientFilteredList : undefined;
+window.renderClients = typeof renderClients !== 'undefined' ? renderClients : undefined;
+window.filterClientsTable = typeof filterClientsTable !== 'undefined' ? filterClientsTable : undefined;
+window.setClientFilter = typeof setClientFilter !== 'undefined' ? setClientFilter : undefined;
+window.setClientSort = typeof setClientSort !== 'undefined' ? setClientSort : undefined;
+window.renderClientTableRows = typeof renderClientTableRows !== 'undefined' ? renderClientTableRows : undefined;
+window.openClientModal = typeof openClientModal !== 'undefined' ? openClientModal : undefined;
+window.handleGstinInput = typeof handleGstinInput !== 'undefined' ? handleGstinInput : undefined;
+window.captureLiveGpsForClient = typeof captureLiveGpsForClient !== 'undefined' ? captureLiveGpsForClient : undefined;
+window.handleClientSubmit = typeof handleClientSubmit !== 'undefined' ? handleClientSubmit : undefined;
+window.openClientProfileModal = typeof openClientProfileModal !== 'undefined' ? openClientProfileModal : undefined;
+window.renderClientProfileTabContent = typeof renderClientProfileTabContent !== 'undefined' ? renderClientProfileTabContent : undefined;
+window.setClientProfileTab = typeof setClientProfileTab !== 'undefined' ? setClientProfileTab : undefined;
+window.openClientStatementModal = typeof openClientStatementModal !== 'undefined' ? openClientStatementModal : undefined;
+window.exportClientsCSV = typeof exportClientsCSV !== 'undefined' ? exportClientsCSV : undefined;
+window.openNewClientModal = window.openClientModal;
+
+</script>
   <script>
 /**
    * =========================================================================
