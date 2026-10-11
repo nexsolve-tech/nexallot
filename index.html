@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Nexallot - Field Operations & Workforce Platform | NexSolve</title>
+  <title>Nexallot - Field Operations & Workforce Platform</title>
   
   <!-- FontAwesome Icons & Google Fonts -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1483,14 +1483,173 @@ h1, h2, h3, h4, h5, h6 {
     cursor: pointer;
     transition: all 0.2s;
   }
-  .nav-subtab:hover {
-    color: var(--primary);
-  }
   .nav-subtab.active {
     color: var(--primary);
     border-bottom-color: var(--primary);
     background: var(--bg-secondary);
   }
+
+/* Login Screen Overlay */
+.login-screen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: radial-gradient(circle at 50% 20%, #1e293b 0%, #0f172a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+.login-card {
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 440px;
+  padding: 2.25rem 2rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  color: #f8fafc;
+}
+.login-brand-header {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+.login-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(15, 118, 110, 0.25);
+  border: 1px solid rgba(13, 148, 136, 0.4);
+  color: #2dd4bf;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+.login-brand-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+.login-brand-title span {
+  color: #38bdf8;
+}
+.login-brand-subtitle {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin-top: 0.35rem;
+}
+.login-company-pill {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.login-input-group {
+  margin-bottom: 1.15rem;
+}
+.login-input-group label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 0.4rem;
+}
+.login-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.login-input-wrap i {
+  position: absolute;
+  left: 1rem;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+.login-input-wrap input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.6rem;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 0.92rem;
+  transition: all 0.2s ease;
+}
+.login-input-wrap input:focus {
+  outline: none;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.25);
+  background: rgba(15, 23, 42, 0.9);
+}
+.login-submit-btn {
+  width: 100%;
+  padding: 0.85rem;
+  background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+  border: none;
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-shadow: 0 4px 14px rgba(15, 118, 110, 0.35);
+  transition: all 0.2s ease;
+  margin-top: 1.25rem;
+}
+.login-submit-btn:hover {
+  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+  transform: translateY(-1px);
+}
+.login-quick-chips {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.login-quick-chips span {
+  font-size: 0.72rem;
+  color: #64748b;
+  display: block;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+.login-chips-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.login-chip {
+  padding: 0.35rem 0.65rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.login-chip:hover {
+  background: rgba(13, 148, 136, 0.2);
+  color: #2dd4bf;
+  border-color: rgba(13, 148, 136, 0.4);
+}
 
 </style>
 
@@ -1629,13 +1788,11 @@ h1, h2, h3, h4, h5, h6 {
             <button onclick="triggerActiveVisitCheckOut()" class="btn btn-danger btn-sm" style="padding: 2px 8px; font-size: 0.7rem; margin-left: 4px;">Check-Out</button>
           </div>
 
-          <!-- Role Switcher -->
-          <select id="role-selector" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.8rem; font-weight: 600;" onchange="handleRoleSwitch(this.value)">
-            <option value="EXECUTIVE">Role: Field Executive (Amit)</option>
-            <option value="MANAGER">Role: Sales Manager (Rajesh)</option>
-            <option value="ADMIN">Role: Top Mgmt / Admin (Vikram)</option>
-            <option value="ACCOUNTS">Role: Accounts Team (Suresh)</option>
-          </select>
+          <!-- Authenticated Role Badge (Replaced dev dropdown) -->
+          <div id="header-user-role-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; background: rgba(15,118,110,0.12); border: 1px solid var(--primary); color: var(--primary); font-size: 0.8rem; font-weight: 700;">
+            <i class="fas fa-shield-alt"></i>
+            <span id="header-role-text">EXECUTIVE</span>
+          </div>
 
           <!-- Refresh Button -->
           <button class="btn btn-secondary btn-sm" id="header-refresh-btn" onclick="refreshCurrentView()" title="Refresh Data" style="display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 50px;">
@@ -2162,7 +2319,10 @@ h1, h2, h3, h4, h5, h6 {
   window.refreshCurrentView = refreshCurrentView;
 
   function handleLogout() {
+    localStorage.removeItem("nexallot_session_user");
+    state.currentUser = null;
     showToast("Logged out successfully.", "info");
+    checkAndRenderAuth();
   }
   window.handleLogout = handleLogout;
 
@@ -2424,6 +2584,280 @@ h1, h2, h3, h4, h5, h6 {
     }
   }
   window.renderView = renderView;
+
+  // =========================================================================
+  // AUTHENTICATION & API BRIDGE ENGINE
+  // =========================================================================
+  window.NEXALLOT_API_URL = "https://script.google.com/macros/s/AKfycbzX6l1Z5i1TaHNZkgX0Wxfmq5fi9gLXK81TyzHLCFJqdC2kZx9zUx-f6BcMnIUfo5DE/exec";
+
+  function getActiveOrgCode() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const orgParam = params.get("org") || params.get("company");
+      if (orgParam) {
+        localStorage.setItem("nexallot_org", orgParam.trim().toLowerCase());
+        return orgParam.trim().toLowerCase();
+      }
+    } catch(e) {}
+    return localStorage.getItem("nexallot_org") || "nexsolve";
+  }
+  window.getActiveOrgCode = getActiveOrgCode;
+
+  async function callBackendApi(action, params = {}) {
+    const baseUrl = window.NEXALLOT_API_URL;
+    const url = new URL(baseUrl);
+    url.searchParams.set("action", action);
+    for (const key in params) {
+      if (params[key] !== undefined && params[key] !== null) {
+        if (typeof params[key] === "object") {
+          url.searchParams.set(key, JSON.stringify(params[key]));
+        } else {
+          url.searchParams.set(key, String(params[key]));
+        }
+      }
+    }
+    try {
+      const res = await fetch(url.toString(), { method: "GET", mode: "cors" });
+      return await res.json();
+    } catch(err) {
+      console.warn("Backend API call warning:", err);
+      throw err;
+    }
+  }
+  window.callBackendApi = callBackendApi;
+
+  function updateAuthenticatedProfileUI() {
+    if (!state.currentUser) return;
+    const role = state.currentUser.Role || "EXECUTIVE";
+    const name = state.currentUser.Full_Name || "User";
+    const initials = name.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase();
+
+    const nun = document.getElementById("nav-user-name");
+    if (nun) nun.innerText = name;
+    const nur = document.getElementById("nav-user-role");
+    if (nur) nur.innerText = role;
+    const nua = document.getElementById("nav-user-avatar");
+    if (nua) nua.innerText = initials;
+    const hrt = document.getElementById("header-role-text");
+    if (hrt) hrt.innerText = role;
+
+    // Filter sidebar menu based on authenticated role
+    document.querySelectorAll(".menu-item").forEach(item => {
+      const view = item.getAttribute("data-view");
+      if (role === "EXECUTIVE") {
+        if (view === "users" || view === "masters" || view === "settings") item.style.display = "none";
+        else item.style.display = "";
+      } else if (role === "ACCOUNTS") {
+        if (view === "users" || view === "masters") item.style.display = "none";
+        else item.style.display = "";
+      } else {
+        item.style.display = "";
+      }
+    });
+  }
+  window.updateAuthenticatedProfileUI = updateAuthenticatedProfileUI;
+
+  function checkAndRenderAuth() {
+    const saved = localStorage.getItem("nexallot_session_user");
+    if (saved) {
+      try {
+        state.currentUser = JSON.parse(saved);
+        updateAuthenticatedProfileUI();
+        hideLoginOverlay();
+        renderView(state.currentView || "dashboard");
+        return;
+      } catch(e) {
+        localStorage.removeItem("nexallot_session_user");
+      }
+    }
+    state.currentUser = null;
+    showLoginOverlay();
+  }
+  window.checkAndRenderAuth = checkAndRenderAuth;
+
+  function showLoginOverlay() {
+    let overlay = document.getElementById("login-screen-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "login-screen-overlay";
+      overlay.className = "login-screen-overlay";
+      document.body.appendChild(overlay);
+    }
+    const currentOrg = getActiveOrgCode();
+    overlay.innerHTML = `
+      <div class="login-card">
+        <div class="login-brand-header">
+          <div class="login-brand-badge">
+            <i class="fas fa-cubes"></i> Field Operations Suite
+          </div>
+          <h1 class="login-brand-title">Nex<span>allot</span></h1>
+          <p class="login-brand-subtitle">Workforce, Sales Orders & Collections Hub</p>
+        </div>
+
+        <div class="login-company-pill">
+          <div>
+            <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Organization Workspace</div>
+            <div style="font-weight: 700; color: #ffffff; font-size: 0.95rem;">
+              <i class="fas fa-building" style="color: #38bdf8; margin-right: 6px;"></i>${currentOrg.toUpperCase()}
+            </div>
+          </div>
+          <button onclick="promptChangeOrg()" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer;">
+            Change
+          </button>
+        </div>
+
+        <form id="login-form" onsubmit="handleLoginSubmit(event)">
+          <div id="login-error-alert" style="display: none; background: rgba(239,68,68,0.18); border: 1px solid #ef4444; color: #fca5a5; padding: 10px 14px; border-radius: 8px; font-size: 0.82rem; margin-bottom: 1rem;"></div>
+
+          <div class="login-input-group">
+            <label for="login-identifier">Email ID or Mobile Number</label>
+            <div class="login-input-wrap">
+              <i class="fas fa-user"></i>
+              <input type="text" id="login-identifier" placeholder="e.g. admin@nexsolve.in or 9876543210" required autocomplete="username">
+            </div>
+          </div>
+
+          <div class="login-input-group">
+            <label for="login-passcode">Passcode</label>
+            <div class="login-input-wrap">
+              <i class="fas fa-lock"></i>
+              <input type="password" id="login-passcode" placeholder="Enter your passcode" required autocomplete="current-password">
+            </div>
+          </div>
+
+          <button type="submit" id="login-submit-btn" class="login-submit-btn">
+            <span id="login-btn-text"><i class="fas fa-sign-in-alt"></i> Sign In to Nexallot</span>
+          </button>
+        </form>
+
+        <div class="login-quick-chips">
+          <span>Quick Login for Demo</span>
+          <div class="login-chips-list">
+            <button type="button" class="login-chip" onclick="fillDemoCredentials('admin@nexsolve.in', 'admin123')">👑 Admin</button>
+            <button type="button" class="login-chip" onclick="fillDemoCredentials('rajesh@nexsolve.in', 'manager123')">👔 Manager</button>
+            <button type="button" class="login-chip" onclick="fillDemoCredentials('amit@nexsolve.in', 'exec123')">🏃 Field Exec</button>
+            <button type="button" class="login-chip" onclick="fillDemoCredentials('suresh@nexsolve.in', 'accounts123')">💼 Accounts</button>
+          </div>
+        </div>
+      </div>
+    `;
+    overlay.style.display = "flex";
+  }
+  window.showLoginOverlay = showLoginOverlay;
+
+  function hideLoginOverlay() {
+    const overlay = document.getElementById("login-screen-overlay");
+    if (overlay) overlay.style.display = "none";
+  }
+  window.hideLoginOverlay = hideLoginOverlay;
+
+  function promptChangeOrg() {
+    const current = getActiveOrgCode();
+    const newOrg = prompt("Enter Organization Code (e.g., nexsolve):", current);
+    if (newOrg && newOrg.trim()) {
+      localStorage.setItem("nexallot_org", newOrg.trim().toLowerCase());
+      showLoginOverlay();
+    }
+  }
+  window.promptChangeOrg = promptChangeOrg;
+
+  function fillDemoCredentials(identifier, passcode) {
+    const idInput = document.getElementById("login-identifier");
+    const passInput = document.getElementById("login-passcode");
+    if (idInput) idInput.value = identifier;
+    if (passInput) passInput.value = passcode;
+  }
+  window.fillDemoCredentials = fillDemoCredentials;
+
+  async function handleLoginSubmit(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    const idInput = document.getElementById("login-identifier");
+    const passInput = document.getElementById("login-passcode");
+    const errAlert = document.getElementById("login-error-alert");
+    const btn = document.getElementById("login-submit-btn");
+    const btnText = document.getElementById("login-btn-text");
+
+    const identifier = idInput ? idInput.value.trim() : "";
+    const passcode = passInput ? passInput.value.trim() : "";
+    const orgCode = getActiveOrgCode();
+
+    if (!identifier || !passcode) {
+      if (errAlert) { errAlert.innerText = "Please enter both Email/Mobile and Passcode."; errAlert.style.display = "block"; }
+      return;
+    }
+
+    if (btnText) btnText.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Authenticating...';
+    if (btn) btn.disabled = true;
+    if (errAlert) errAlert.style.display = "none";
+
+    // 1. Attempt Live Server Authentication
+    try {
+      const res = await callBackendApi("login", { orgCode: orgCode, identifier: identifier, passcode: passcode });
+      if (res && res.success && res.user) {
+        state.currentUser = res.user;
+        localStorage.setItem("nexallot_session_user", JSON.stringify(res.user));
+        if (res.company) state.company = res.company;
+        
+        // Asynchronously load initial live data from spreadsheet
+        try {
+          callBackendApi("get_initial_data", { orgCode: orgCode, userId: res.user.User_ID, role: res.user.Role })
+            .then(data => {
+              if (data && data.success) {
+                if (data.users) state.users = data.users;
+                if (data.clients) state.clients = data.clients;
+                if (data.inventory) state.inventory = data.inventory;
+                if (data.visits) state.visits = data.visits;
+                if (data.orders) state.orders = data.orders;
+                if (data.payments) state.payments = data.payments;
+                if (data.expenses) state.expenses = data.expenses;
+                if (data.complaints) state.complaints = data.complaints;
+                renderView(state.currentView || "dashboard");
+              }
+            }).catch(e => console.log("Background data sync notice:", e));
+        } catch(e) {}
+
+        updateAuthenticatedProfileUI();
+        hideLoginOverlay();
+        renderView(state.currentView || "dashboard");
+        showToast("Signed in as " + res.user.Full_Name + " (" + res.user.Role + ")", "success");
+        return;
+      } else if (res && !res.success && res.error) {
+        throw new Error(res.error);
+      }
+    } catch (apiErr) {
+      console.warn("Live API login fell back to verified seeded accounts:", apiErr.message);
+    }
+
+    // 2. Demo Seed Accounts Fallback
+    const demoAccounts = [
+      { id: "admin@nexsolve.in", pass: "admin123", user: { User_ID: "USR-100", Full_Name: "Vikram Shah", Role: "ADMIN", Designation: "Director", Department: "Management" } },
+      { id: "rajesh@nexsolve.in", pass: "manager123", user: { User_ID: "USR-101", Full_Name: "Rajesh Sharma", Role: "MANAGER", Designation: "Area Sales Manager", Department: "Sales & Marketing", Manager_ID: "USR-100" } },
+      { id: "amit@nexsolve.in", pass: "exec123", user: { User_ID: "USR-102", Full_Name: "Amit Patel", Role: "EXECUTIVE", Designation: "Sr. Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
+      { id: "pooja@nexsolve.in", pass: "exec123", user: { User_ID: "USR-103", Full_Name: "Pooja Verma", Role: "EXECUTIVE", Designation: "Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
+      { id: "suresh@nexsolve.in", pass: "accounts123", user: { User_ID: "USR-104", Full_Name: "Suresh Gupta", Role: "ACCOUNTS", Designation: "Accounts Officer", Department: "Accounts & Finance", Manager_ID: "USR-100" } }
+    ];
+
+    const cleanId = identifier.toLowerCase();
+    const matched = demoAccounts.find(a => (a.id.toLowerCase() === cleanId || a.user.User_ID.toLowerCase() === cleanId) && a.pass === passcode);
+
+    if (matched) {
+      state.currentUser = matched.user;
+      localStorage.setItem("nexallot_session_user", JSON.stringify(matched.user));
+      updateAuthenticatedProfileUI();
+      hideLoginOverlay();
+      renderView(state.currentView || "dashboard");
+      showToast("Signed in as " + matched.user.Full_Name + " (" + matched.user.Role + ")", "success");
+      return;
+    }
+
+    if (errAlert) {
+      errAlert.innerText = "Invalid credentials. Please verify your Email/Mobile and Passcode.";
+      errAlert.style.display = "block";
+    }
+    if (btnText) btnText.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In to Nexallot';
+    if (btn) btn.disabled = false;
+  }
+  window.handleLoginSubmit = handleLoginSubmit;
 </script>
   <script>
 (function() {
@@ -8014,10 +8448,10 @@ let activeTicketCategoryFilter = "ALL"; // ALL | SERVICE | COMPLAINT | OPEN | RE
   <script>
     function initializeNexallotApp() {
       try {
+        if (typeof checkAndRenderAuth === 'function') checkAndRenderAuth();
         if (typeof loadSavedMasters === 'function') loadSavedMasters();
         if (typeof updateActiveVisitPill === 'function') updateActiveVisitPill();
         if (typeof updateHeaderMeta === 'function') updateHeaderMeta(state.currentView || 'dashboard');
-        if (typeof renderView === 'function') renderView(state.currentView || 'dashboard');
         console.log("✅ Nexallot Application Initialized Successfully.");
       } catch (err) {
         console.error("Initialization error:", err);
