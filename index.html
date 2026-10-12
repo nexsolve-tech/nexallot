@@ -2312,9 +2312,15 @@ h1, h2, h3, h4, h5, h6 {
   function refreshCurrentView() {
     const icon = document.getElementById("header-refresh-icon");
     if (icon) icon.classList.add("fa-spin");
-    setTimeout(() => { if (icon) icon.classList.remove("fa-spin"); }, 600);
-    renderView(state.currentView);
-    showToast("Refreshed view data", "success");
+    if (typeof loadLiveAppDataFromSheet === 'function') {
+      loadLiveAppDataFromSheet(true).finally(() => {
+        if (icon) icon.classList.remove("fa-spin");
+      });
+    } else {
+      renderView(state.currentView);
+      if (icon) icon.classList.remove("fa-spin");
+      showToast("Refreshed view data", "success");
+    }
   }
   window.refreshCurrentView = refreshCurrentView;
 
@@ -2695,7 +2701,85 @@ h1, h2, h3, h4, h5, h6 {
       }
     });
   }
-  window.updateAuthenticatedProfileUI = updateAuthenticatedProfileUI;
+  async function loadLiveAppDataFromSheet(showFeedback = false) {
+    try {
+      const orgCode = getActiveOrgCode();
+      const user = state.currentUser || { User_ID: "USR-100", Role: "ADMIN" };
+      if (showFeedback) {
+        showToast("Syncing with live Google Sheet database...", "info");
+      }
+      const data = await callBackendApi("get_initial_data", {
+        orgCode: orgCode,
+        userId: user.User_ID,
+        role: user.Role
+      });
+
+      if (data && data.success) {
+        if (Array.isArray(data.users)) state.users = data.users;
+        if (Array.isArray(data.clients)) {
+          state.clients = data.clients.map(c => ({
+            ...c,
+            Outstanding_Balance: Number(c.Outstanding_Balance || 0),
+            Credit_Limit: Number(c.Credit_Limit || 0)
+          }));
+        }
+        if (Array.isArray(data.inventory)) state.inventory = data.inventory;
+        if (Array.isArray(data.visits)) state.visits = data.visits;
+        if (Array.isArray(data.orders)) {
+          state.orders = data.orders.map(o => {
+            let items = [];
+            if (Array.isArray(o.Items)) {
+              items = o.Items;
+            } else if (o.Items_JSON) {
+              try { items = JSON.parse(o.Items_JSON); } catch(e) { items = []; }
+            }
+            if (!Array.isArray(items)) items = [];
+            items = items.map(it => ({
+              orderedQty: it.orderedQty || it.qty || 1,
+              deliveredQty: it.deliveredQty || 0,
+              ...it
+            }));
+            return {
+              ...o,
+              Items: items,
+              Total_Amount: Number(o.Total_Amount || 0),
+              Paid_Amount: Number(o.Paid_Amount || 0)
+            };
+          });
+        }
+        if (Array.isArray(data.payments)) {
+          state.payments = data.payments.map(p => {
+            let allocs = [];
+            if (Array.isArray(p.Allocations)) {
+              allocs = p.Allocations;
+            } else if (p.Order_Allocations_JSON) {
+              try { allocs = JSON.parse(p.Order_Allocations_JSON); } catch(e) { allocs = []; }
+            }
+            return {
+              ...p,
+              Allocations: Array.isArray(allocs) ? allocs : [],
+              Amount: Number(p.Amount || 0)
+            };
+          });
+        }
+        if (Array.isArray(data.expenses)) state.expenses = data.expenses;
+        if (Array.isArray(data.complaints)) state.complaints = data.complaints;
+
+        // Re-render view with fresh database data
+        if (typeof renderView === 'function') {
+          renderView(state.currentView || "dashboard");
+        }
+        console.log("✅ Live Google Sheet data successfully populated into app state!");
+        if (showFeedback) {
+          showToast("Live Google Sheet data refreshed!", "success");
+        }
+        return true;
+      }
+    } catch(err) {
+      console.warn("Notice: Live data fetch error:", err.message);
+    }
+  }
+  window.loadLiveAppDataFromSheet = loadLiveAppDataFromSheet;
 
   function checkAndRenderAuth() {
     const saved = localStorage.getItem("nexallot_session_user");
@@ -2705,6 +2789,7 @@ h1, h2, h3, h4, h5, h6 {
         updateAuthenticatedProfileUI();
         hideLoginOverlay();
         renderView(state.currentView || "dashboard");
+        loadLiveAppDataFromSheet();
         return;
       } catch(e) {
         localStorage.removeItem("nexallot_session_user");
@@ -2838,28 +2923,11 @@ h1, h2, h3, h4, h5, h6 {
         localStorage.setItem("nexallot_session_user", JSON.stringify(res.user));
         if (res.company) state.company = res.company;
         
-        // Asynchronously load initial live data from spreadsheet
-        try {
-          callBackendApi("get_initial_data", { orgCode: orgCode, userId: res.user.User_ID, role: res.user.Role })
-            .then(data => {
-              if (data && data.success) {
-                if (data.users) state.users = data.users;
-                if (data.clients) state.clients = data.clients;
-                if (data.inventory) state.inventory = data.inventory;
-                if (data.visits) state.visits = data.visits;
-                if (data.orders) state.orders = data.orders;
-                if (data.payments) state.payments = data.payments;
-                if (data.expenses) state.expenses = data.expenses;
-                if (data.complaints) state.complaints = data.complaints;
-                renderView(state.currentView || "dashboard");
-              }
-            }).catch(e => console.log("Background data sync notice:", e));
-        } catch(e) {}
-
         updateAuthenticatedProfileUI();
         hideLoginOverlay();
         renderView(state.currentView || "dashboard");
         showToast("Signed in as " + res.user.Full_Name + " (" + res.user.Role + ")", "success");
+        await loadLiveAppDataFromSheet(true);
         return;
       } else if (res && !res.success && res.error) {
         throw new Error(res.error);
@@ -2887,6 +2955,7 @@ h1, h2, h3, h4, h5, h6 {
       hideLoginOverlay();
       renderView(state.currentView || "dashboard");
       showToast("Signed in as " + matched.user.Full_Name + " (" + matched.user.Role + ")", "success");
+      await loadLiveAppDataFromSheet(true);
       return;
     }
 
@@ -3151,6 +3220,7 @@ h1, h2, h3, h4, h5, h6 {
       return;
     }
 
+    const now = new Date();
     const preClient = state.clients.find(c => c.Client_ID === preSelectedClientId);
     const preClientName = preClient ? preClient.Client_Name : "";
 
