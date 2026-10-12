@@ -3273,6 +3273,7 @@ h1, h2, h3, h4, h5, h6 {
     }
 
     const modal = document.getElementById("modal-container");
+    const checkOutSystemTime = now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     modal.innerHTML = `
       <div class="modal-overlay show" id="active-modal">
         <div class="modal-container">
@@ -3282,26 +3283,33 @@ h1, h2, h3, h4, h5, h6 {
           </div>
           <form onsubmit="handleCheckOutSubmit(event, '${visitId}')">
             <div class="modal-body">
-              <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Client Account</div>
-                  <strong style="color: var(--text-main); font-size: 0.95rem;">${getClientName(visit.Client_ID)}</strong>
+              <div style="background: var(--bg-primary); padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Client Account</div>
+                    <strong style="color: var(--text-main); font-size: 0.95rem;">${getClientName(visit.Client_ID)}</strong>
+                  </div>
+                  <span class="badge badge-success" style="font-size: 0.72rem;"><i class="fas fa-lock"></i> System Time Locked</span>
                 </div>
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Check-In Time</div>
-                  <strong style="color: var(--primary); font-size: 0.95rem;">${visit.Check_In_Time}</strong>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
+                  <div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Check-In Time</div>
+                    <strong style="color: var(--primary); font-size: 0.9rem;">${visit.Check_In_Time}</strong>
+                  </div>
+                  <div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Check-Out Time</div>
+                    <strong style="color: var(--danger); font-size: 0.9rem;">${checkOutSystemTime}</strong>
+                  </div>
+                  <div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Duration</div>
+                    <strong style="color: var(--success); font-size: 0.9rem;">${elapsedMins} mins</strong>
+                  </div>
                 </div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Time Spent (Minutes) *</label>
-                <input type="number" class="form-control" id="co-time-spent" min="1" value="${elapsedMins}" required>
-                <small style="color: var(--text-muted); font-size: 0.75rem;">Dynamic elapsed time calculated from check-in to check-out.</small>
               </div>
 
               <div class="form-group">
                 <label class="form-label">Meeting Outcome & Next Action *</label>
-                <textarea class="form-control" id="co-notes" rows="3" required placeholder="Summary of meeting, client feedback..."></textarea>
+                <textarea class="form-control" id="co-notes" rows="3" required placeholder="Summary of meeting, client feedback, next follow-up..."></textarea>
               </div>
             </div>
             <div class="modal-footer">
@@ -3321,9 +3329,27 @@ h1, h2, h3, h4, h5, h6 {
 
     const now = new Date();
     visit.Check_Out_Time = now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    const timeSpentInput = document.getElementById("co-time-spent");
-    const spentMins = timeSpentInput ? Number(timeSpentInput.value) : 1;
-    visit.Time_Spent_Mins = Math.max(1, spentMins || 1);
+
+    // Enforce strictly system-calculated duration (no manual override)
+    let elapsedMins = 1;
+    if (visit._checkInTimestamp) {
+      elapsedMins = Math.max(1, Math.round((now.getTime() - visit._checkInTimestamp) / 60000));
+    } else if (visit.Check_In_Time) {
+      try {
+        const match = visit.Check_In_Time.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+        if (match) {
+          let h = parseInt(match[1], 10);
+          const m = parseInt(match[2], 10);
+          const ap = (match[3] || '').toUpperCase();
+          if (ap === 'PM' && h < 12) h += 12;
+          if (ap === 'AM' && h === 12) h = 0;
+          const inDate = new Date();
+          inDate.setHours(h, m, 0, 0);
+          elapsedMins = Math.max(1, Math.round((now.getTime() - inDate.getTime()) / 60000));
+        }
+      } catch(e) {}
+    }
+    visit.Time_Spent_Mins = elapsedMins;
     visit.Outcome_Status = "COMPLETED";
     const coNotes = document.getElementById("co-notes") ? document.getElementById("co-notes").value.trim() : "";
     if (coNotes) {
