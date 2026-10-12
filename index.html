@@ -2724,7 +2724,19 @@ h1, h2, h3, h4, h5, h6 {
           }));
         }
         if (Array.isArray(data.inventory)) state.inventory = data.inventory;
-        if (Array.isArray(data.visits)) state.visits = data.visits;
+        if (Array.isArray(data.visits)) {
+          state.visits = data.visits.map(v => {
+            let gps = String(v.Check_In_GPS || '').trim();
+            if (/^\d+$/.test(gps)) gps = "Auto GPS";
+            let att = String(v.Attachment || '').trim();
+            if (!att.startsWith('http') && !att.startsWith('data:image')) att = "";
+            return {
+              ...v,
+              Check_In_GPS: gps,
+              Attachment: att
+            };
+          });
+        }
         if (Array.isArray(data.orders)) {
           state.orders = data.orders.map(o => {
             let items = [];
@@ -2970,7 +2982,109 @@ h1, h2, h3, h4, h5, h6 {
 </script>
   <script>
 (function() {
-    function renderDashboard(container) {
+  window._dashFilterStatus = window._dashFilterStatus || "ALL";
+  window._dashSearchQuery = window._dashSearchQuery || "";
+
+  function getFilteredDashOrders() {
+    const ordersList = state.orders || [];
+    const q = (window._dashSearchQuery || "").toLowerCase().trim();
+    const status = window._dashFilterStatus || "ALL";
+
+    return ordersList.filter(o => {
+      const items = getOrderItems(o);
+      const balance = Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0);
+      const is100Paid = balance <= 0;
+      const clientName = (getClientName(o.Client_ID) || "").toLowerCase();
+      const orderId = (o.Order_ID || "").toLowerCase();
+      const deliveryStatus = (o.Delivery_Status || "PENDING").toUpperCase();
+
+      // Status filter
+      if (status === "PENDING_DELIVERY" && deliveryStatus === "DELIVERED") return false;
+      if (status === "DELIVERED" && deliveryStatus !== "DELIVERED") return false;
+      if (status === "PAYMENT_DUE" && is100Paid) return false;
+      if (status === "PAID" && !is100Paid) return false;
+
+      // Query filter
+      if (!q) return true;
+      return orderId.includes(q) || clientName.includes(q) || deliveryStatus.toLowerCase().includes(q);
+    });
+  }
+
+  function renderDashOrderRows(orders) {
+    if (!orders || orders.length === 0) {
+      return `<tr><td colspan="8" style="text-align:center; padding: 28px; color: var(--text-muted); font-size: 0.9rem;">No matching sales orders found.</td></tr>`;
+    }
+
+    return orders.map(o => {
+      const items = getOrderItems(o);
+      const balance = Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0);
+      const is100Paid = balance <= 0;
+      const totalQty = items.reduce((sum, it) => sum + Number(it.orderedQty || 0), 0);
+      return `
+        <tr>
+          <td><strong style="color: var(--text-main);">${o.Order_ID || '-'}</strong></td>
+          <td>${o.Date || '-'}</td>
+          <td><strong>${getClientName(o.Client_ID)}</strong></td>
+          <td><span class="badge badge-on-hold">${totalQty} Units (${items.length} items)</span></td>
+          <td><strong>₹${Number(o.Total_Amount || 0).toLocaleString()}</strong></td>
+          <td>
+            <span class="badge ${is100Paid ? 'badge-active' : 'badge-pending'}">
+              ${is100Paid ? '100% Paid' : 'Due: ₹' + balance.toLocaleString()}
+            </span>
+          </td>
+          <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : 'badge-pending'}">${o.Delivery_Status || 'PENDING'}</span></td>
+          <td style="white-space: nowrap;">
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Order Breakdown" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                <i class="fas fa-eye"></i>
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery Status" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                <i class="fas fa-truck"></i>
+              </button>
+              ${!is100Paid ? `
+                <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-wallet"></i>
+                </button>
+              ` : `
+                <button class="btn btn-secondary btn-sm disabled" disabled title="100% Paid" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; opacity: 0.4; cursor: not-allowed;">
+                  <i class="fas fa-check" style="color: var(--success);"></i>
+                </button>
+              `}
+              <button class="btn btn-success btn-sm" onclick="openOrderCommsModal('${o.Order_ID}')" title="Send WhatsApp / Email" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                <i class="fas fa-paper-plane"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function handleDashOrderSearch(query) {
+    window._dashSearchQuery = query;
+    const filtered = getFilteredDashOrders();
+    const tbody = document.getElementById("dash-orders-tbody");
+    const countEl = document.getElementById("dash-orders-count");
+    if (tbody) tbody.innerHTML = renderDashOrderRows(filtered);
+    if (countEl) countEl.textContent = filtered.length;
+  }
+  window.handleDashOrderSearch = handleDashOrderSearch;
+
+  function setDashStatusFilter(status) {
+    window._dashFilterStatus = status;
+    const chips = document.querySelectorAll(".dash-filter-chip");
+    chips.forEach(chip => {
+      chip.classList.toggle("active", chip.getAttribute("data-status") === status);
+    });
+    const filtered = getFilteredDashOrders();
+    const tbody = document.getElementById("dash-orders-tbody");
+    const countEl = document.getElementById("dash-orders-count");
+    if (tbody) tbody.innerHTML = renderDashOrderRows(filtered);
+    if (countEl) countEl.textContent = filtered.length;
+  }
+  window.setDashStatusFilter = setDashStatusFilter;
+
+  function renderDashboard(container) {
     if (!container) container = document.getElementById("app-content");
     if (!container) return;
     const ordersList = state.orders || [];
@@ -2981,6 +3095,14 @@ h1, h2, h3, h4, h5, h6 {
     const totalOrders = ordersList.reduce((sum, o) => sum + Number(o.Total_Amount || 0), 0);
     const totalPayments = paymentsList.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
     const pendingClaims = expensesList.filter(e => (e.Overall_Approval_Status || e.Manager_Status) === "PENDING" || (e.Manager_Status || "").includes("PENDING")).length;
+
+    const filteredOrders = getFilteredDashOrders();
+
+    // Compute status counts
+    const pendingDeliveryCount = ordersList.filter(o => (o.Delivery_Status || 'PENDING') !== 'DELIVERED').length;
+    const deliveredCount = ordersList.filter(o => (o.Delivery_Status || '') === 'DELIVERED').length;
+    const paymentDueCount = ordersList.filter(o => (Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0)) > 0).length;
+    const paidCount = ordersList.filter(o => (Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0)) <= 0).length;
 
     container.innerHTML = `
       ${state.activeVisit ? `
@@ -3032,13 +3154,32 @@ h1, h2, h3, h4, h5, h6 {
       </div>
 
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
           <h3 class="card-title"><i class="fas fa-bolt" style="color: var(--primary); margin-right: 0.5rem;"></i> Quick Operations Hub</h3>
           <div style="display: flex; gap: 0.5rem;">
             ${!state.activeVisit ? `<button class="btn btn-primary btn-sm" onclick="openNewVisitModal()"><i class="fas fa-map-marker-alt"></i> New Check-In</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal()"><i class="fas fa-cart-plus"></i> Book Order</button>
           </div>
         </div>
+
+        <!-- In-Place Quick Filter Bar (Never Replaces Search Input on Typing) -->
+        <div style="padding: 12px 16px; background: var(--bg-primary); border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px; max-width: 380px; position: relative;">
+            <i class="fas fa-search" style="position: absolute; left: 10px; color: var(--text-muted); font-size: 0.85rem;"></i>
+            <input type="text" id="dash-order-search" class="form-control" style="padding-left: 32px;" placeholder="Search Order ID, Client, Status..." value="${window._dashSearchQuery}" oninput="handleDashOrderSearch(this.value)">
+          </div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <button type="button" class="btn btn-sm dash-filter-chip ${window._dashFilterStatus === 'ALL' ? 'btn-primary' : 'btn-secondary'}" data-status="ALL" onclick="setDashStatusFilter('ALL')">All (${ordersList.length})</button>
+            <button type="button" class="btn btn-sm dash-filter-chip ${window._dashFilterStatus === 'PENDING_DELIVERY' ? 'btn-primary' : 'btn-secondary'}" data-status="PENDING_DELIVERY" onclick="setDashStatusFilter('PENDING_DELIVERY')">Pending Delivery (${pendingDeliveryCount})</button>
+            <button type="button" class="btn btn-sm dash-filter-chip ${window._dashFilterStatus === 'DELIVERED' ? 'btn-primary' : 'btn-secondary'}" data-status="DELIVERED" onclick="setDashStatusFilter('DELIVERED')">Delivered (${deliveredCount})</button>
+            <button type="button" class="btn btn-sm dash-filter-chip ${window._dashFilterStatus === 'PAYMENT_DUE' ? 'btn-primary' : 'btn-secondary'}" data-status="PAYMENT_DUE" onclick="setDashStatusFilter('PAYMENT_DUE')">Due (${paymentDueCount})</button>
+            <button type="button" class="btn btn-sm dash-filter-chip ${window._dashFilterStatus === 'PAID' ? 'btn-primary' : 'btn-secondary'}" data-status="PAID" onclick="setDashStatusFilter('PAID')">Paid (${paidCount})</button>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">
+            Showing <strong id="dash-orders-count">${filteredOrders.length}</strong> orders
+          </div>
+        </div>
+
         <div class="card-body" style="padding: 0;">
           <div class="table-wrapper" style="border: none; border-radius: 0;">
             <table class="data-table">
@@ -3051,35 +3192,11 @@ h1, h2, h3, h4, h5, h6 {
                   <th>Total Amount</th>
                   <th>Payment Status</th>
                   <th>Delivery Status</th>
-                  <th>Actions</th>
+                  <th style="min-width: 160px;">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                ${ordersList.length === 0 ? `<tr><td colspan="8" style="text-align:center; padding: 24px; color: var(--text-muted);">No sales orders booked yet.</td></tr>` : ordersList.map(o => {
-                  const items = getOrderItems(o);
-                  const balance = Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0);
-                  const is100Paid = balance <= 0;
-                  const totalQty = items.reduce((sum, it) => sum + Number(it.orderedQty || 0), 0);
-                  return `
-                    <tr>
-                      <td><strong>${o.Order_ID || '-'}</strong></td>
-                      <td>${o.Date || '-'}</td>
-                      <td>${getClientName(o.Client_ID)}</td>
-                      <td><span class="badge badge-on-hold">${totalQty} Units (${items.length} items)</span></td>
-                      <td><strong>₹${Number(o.Total_Amount || 0).toLocaleString()}</strong></td>
-                      <td>
-                        <span class="badge ${is100Paid ? 'badge-active' : 'badge-pending'}">${is100Paid ? '100% Paid' : 'Due: ₹' + balance.toLocaleString()}</span>
-                      </td>
-                      <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : 'badge-pending'}">${o.Delivery_Status || 'PENDING'}</span></td>
-                      <td>
-                        <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Items & Details"><i class="fas fa-eye"></i></button>
-                        ${!is100Paid ? `<button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')"><i class="fas fa-wallet"></i> Pay</button>` : ''}
-                        <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')"><i class="fas fa-truck"></i> Deliver</button>
-                        <button class="btn btn-success btn-sm" onclick="openOrderCommsModal('${o.Order_ID}')"><i class="fas fa-paper-plane"></i></button>
-                      </td>
-                    </tr>
-                  `;
-                }).join('')}
+              <tbody id="dash-orders-tbody">
+                ${renderDashOrderRows(filteredOrders)}
               </tbody>
             </table>
           </div>
@@ -3087,8 +3204,6 @@ h1, h2, h3, h4, h5, h6 {
       </div>
     `;
   }
-  window.renderDashboard = renderDashboard;
-
   window.renderDashboard = renderDashboard;
 })();
 </script>
@@ -3192,18 +3307,30 @@ h1, h2, h3, h4, h5, h6 {
         <td><span style="font-weight:600; color:var(--success);">${v.Check_In_Time || 'Ongoing'}</span></td>
         <td>${v.Check_Out_Time ? `<span style="font-weight:600; color:var(--primary);">${v.Check_Out_Time}</span>` : '<span class="badge badge-pending">Active</span>'}</td>
         <td><strong>${v.Time_Spent_Mins ? v.Time_Spent_Mins + ' mins' : (v.Check_Out_Time ? 'Completed' : 'Active')}</strong></td>
-        <td><span style="font-family: monospace; font-size: 0.775rem;">📍 ${v.Check_In_GPS || 'Auto GPS'}</span></td>
+        <td>
+          ${(() => {
+            const gps = String(v.Check_In_GPS || '').trim();
+            if (gps && gps.includes(',') && !/^\d+$/.test(gps)) {
+              const cleanCoords = gps.replace(/[^\d.,\s-]/g, '').trim();
+              return `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanCoords)}" target="_blank" rel="noopener noreferrer" class="badge badge-info" style="font-family: monospace; font-size: 0.775rem; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; padding: 4px 8px;" title="Click to validate location on Google Maps"><i class="fas fa-map-marker-alt" style="color: var(--danger);"></i> ${gps} <i class="fas fa-external-link-alt" style="font-size: 0.65rem;"></i></a>`;
+            } else if (gps && !/^\d+$/.test(gps)) {
+              return `<span style="font-family: monospace; font-size: 0.775rem;">📍 ${gps}</span>`;
+            } else {
+              return `<span style="font-family: monospace; font-size: 0.775rem; color: var(--text-muted);">📍 Auto GPS</span>`;
+            }
+          })()}
+        </td>
         <td style="max-width: 220px;">
           <div style="font-size: 0.8rem; color: var(--text-main);">${v.Notes || '-'}</div>
-          ${v.Attachment ? `<button type="button" class="btn btn-link btn-sm" style="padding:0; font-size:0.75rem; color:var(--primary); font-weight:600; text-decoration:underline; border:none; background:none; cursor:pointer;" onclick="openAttachmentViewer('VISIT', '${v.Visit_ID}')"><i class="fas fa-paperclip"></i> View Proof</button>` : ''}
+          ${(v.Attachment && (String(v.Attachment).startsWith('http') || String(v.Attachment).startsWith('data:image'))) ? `<button type="button" class="btn btn-link btn-sm" style="padding:0; font-size:0.75rem; color:var(--primary); font-weight:600; text-decoration:underline; border:none; background:none; cursor:pointer;" onclick="openAttachmentViewer('VISIT', '${v.Visit_ID}')"><i class="fas fa-paperclip"></i> View Proof</button>` : ''}
         </td>
         <td>
           ${!v.Check_Out_Time ? `
             <button class="btn btn-danger btn-sm" onclick="openCheckOutModal('${v.Visit_ID}')"><i class="fas fa-sign-out-alt"></i> Check-Out</button>
           ` : `
-            <div style="display: flex; gap: 4px;">
-              <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${v.Client_ID}')" title="Book Order for this Client"><i class="fas fa-shopping-cart"></i></button>
-              <button class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${v.Client_ID}')" title="Collect Payment"><i class="fas fa-wallet"></i></button>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${v.Client_ID}')" title="Book Order for this Client" style="min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;"><i class="fas fa-shopping-cart"></i></button>
+              <button class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${v.Client_ID}')" title="Collect Payment" style="min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;"><i class="fas fa-wallet"></i></button>
             </div>
           `}
         </td>
@@ -3235,9 +3362,8 @@ h1, h2, h3, h4, h5, h6 {
           <form onsubmit="handleVisitSubmit(event)">
             <div class="modal-body">
               
-              <!-- Searchable Client Name Field -->
-              <div class="form-group search-select-wrap">
-              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <!-- Check-In Time & GPS Header -->
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                 <div>
                   <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Check-In Time</div>
                   <strong style="color: var(--text-main); font-size: 0.95rem;"><i class="fas fa-clock" style="color: var(--primary); margin-right: 4px;"></i> ${now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</strong>
@@ -3248,10 +3374,11 @@ h1, h2, h3, h4, h5, h6 {
                 </div>
               </div>
 
-              <div class="form-group">
+              <!-- Searchable Client Name Field with Floating Dropdown -->
+              <div class="form-group search-select-wrap" style="position: relative;">
                 <label class="form-label">Client Name *</label>
                 <input type="text" class="form-control" id="v-client-search" placeholder="Type client name to search..." autocomplete="off" oninput="handleVisitClientSearch(this.value)" value="${preClientName}" required>
-                <div class="search-select-options" id="v-client-options"></div>
+                <div class="search-select-options" id="v-client-options" style="position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 9999; background: var(--bg-secondary, #fff); border: 1px solid var(--border-color); border-radius: var(--radius-md, 8px); box-shadow: var(--shadow-lg); max-height: 200px; overflow-y: auto; display: none;"></div>
                 <input type="hidden" id="v-client" value="${preSelectedClientId}" required>
               </div>
 
@@ -3534,12 +3661,77 @@ h1, h2, h3, h4, h5, h6 {
 </script>
   <script>
 (function() {
+    function filterOrdersTable(query) {
+      state.filters.orders = query;
+      const q = (query || "").toLowerCase();
+      const filtered = state.orders.filter(o => 
+        (o.Order_ID || "").toLowerCase().includes(q) ||
+        (getClientName(o.Client_ID) || "").toLowerCase().includes(q) ||
+        (o.Delivery_Status || "").toLowerCase().includes(q)
+      );
+      const tbody = document.getElementById("orders-table-tbody");
+      const countEl = document.getElementById("orders-count-showing");
+      if (tbody) tbody.innerHTML = renderOrderTableRows(filtered);
+      if (countEl) countEl.textContent = filtered.length;
+    }
+    window.filterOrdersTable = filterOrdersTable;
+
+    function renderOrderTableRows(orders) {
+      if (!orders || orders.length === 0) {
+        return `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--text-muted);">No sales orders found.</td></tr>`;
+      }
+
+      return orders.map(o => {
+        const balance = Number(o.Total_Amount) - Number(o.Paid_Amount || 0);
+        const is100Paid = balance <= 0;
+        const totalQty = o.Items.reduce((sum, it) => sum + Number(it.orderedQty || 0), 0);
+        return `
+          <tr>
+            <td><strong>${o.Order_ID}</strong></td>
+            <td>${o.Date}</td>
+            <td><span style="font-weight: 600; color: var(--primary);"><i class="fas fa-calendar-day"></i> ${o.Expected_Delivery_Date || 'Not Set'}</span></td>
+            <td><strong>${getClientName(o.Client_ID)}</strong></td>
+            <td><span class="badge badge-on-hold">${totalQty} Units (${o.Items.length} items)</span></td>
+            <td><strong>₹${Number(o.Total_Amount).toLocaleString()}</strong></td>
+            <td>
+              <span class="badge ${is100Paid ? 'badge-active' : 'badge-pending'}">
+                ${is100Paid ? '100% Paid' : 'Due: ₹' + balance.toLocaleString()}
+              </span>
+            </td>
+            <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : (o.Delivery_Status === 'PARTIAL_DELIVERED' ? 'badge-on-hold' : 'badge-pending')}">${o.Delivery_Status}</span></td>
+            <td style="white-space: nowrap;">
+              <div style="display: inline-flex; align-items: center; gap: 6px;">
+                <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Full Order Items Breakdown" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-eye"></i>
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery Status" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-truck"></i>
+                </button>
+                ${!is100Paid ? `
+                  <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                    <i class="fas fa-wallet"></i>
+                  </button>
+                ` : `
+                  <button class="btn btn-secondary btn-sm disabled" disabled title="100% Paid" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; opacity: 0.4; cursor: not-allowed;">
+                    <i class="fas fa-check" style="color: var(--success);"></i>
+                  </button>
+                `}
+                <button class="btn btn-success btn-sm" onclick="openOrderCommsModal('${o.Order_ID}')" title="Send WhatsApp / Email" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     function renderOrders(container) {
     const filterQuery = (state.filters.orders || "").toLowerCase();
     const filteredOrders = state.orders.filter(o => 
-      o.Order_ID.toLowerCase().includes(filterQuery) ||
-      getClientName(o.Client_ID).toLowerCase().includes(filterQuery) ||
-      o.Delivery_Status.toLowerCase().includes(filterQuery)
+      (o.Order_ID || "").toLowerCase().includes(filterQuery) ||
+      (getClientName(o.Client_ID) || "").toLowerCase().includes(filterQuery) ||
+      (o.Delivery_Status || "").toLowerCase().includes(filterQuery)
     );
 
     container.innerHTML = `
@@ -3551,9 +3743,9 @@ h1, h2, h3, h4, h5, h6 {
       <div class="tab-filter-bar">
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 350px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" class="form-control" placeholder="Search Order ID, Client Name, Status..." value="${state.filters.orders}" oninput="state.filters.orders = this.value; renderOrders(document.getElementById('app-content'))">
+          <input type="text" class="form-control" placeholder="Search Order ID, Client Name, Status..." value="${state.filters.orders || ''}" oninput="filterOrdersTable(this.value)">
         </div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong>${filteredOrders.length}</strong> of ${state.orders.length} orders</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong id="orders-count-showing">${filteredOrders.length}</strong> of ${state.orders.length} orders</div>
       </div>
 
       <div class="table-wrapper">
@@ -3568,41 +3760,11 @@ h1, h2, h3, h4, h5, h6 {
               <th>Total Amount</th>
               <th>Payment Status</th>
               <th>Delivery Status</th>
-              <th>Actions</th>
+              <th style="min-width: 160px;">Actions</th>
             </tr>
           </thead>
-          <tbody>
-            ${filteredOrders.map(o => {
-              const balance = Number(o.Total_Amount) - Number(o.Paid_Amount || 0);
-              const is100Paid = balance <= 0;
-              const totalQty = o.Items.reduce((sum, it) => sum + Number(it.orderedQty || 0), 0);
-              return `
-                <tr>
-                  <td><strong>${o.Order_ID}</strong></td>
-                  <td>${o.Date}</td>
-                  <td><span style="font-weight: 600; color: var(--primary);"><i class="fas fa-calendar-day"></i> ${o.Expected_Delivery_Date || 'Not Set'}</span></td>
-                  <td><strong>${getClientName(o.Client_ID)}</strong></td>
-                  <td><span class="badge badge-on-hold">${totalQty} Units (${o.Items.length} items)</span></td>
-                  <td><strong>₹${Number(o.Total_Amount).toLocaleString()}</strong></td>
-                  <td>
-                    <span class="badge ${is100Paid ? 'badge-active' : 'badge-pending'}">
-                      ${is100Paid ? '100% Paid' : 'Due: ₹' + balance.toLocaleString()}
-                    </span>
-                  </td>
-                  <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : (o.Delivery_Status === 'PARTIAL_DELIVERED' ? 'badge-on-hold' : 'badge-pending')}">${o.Delivery_Status}</span></td>
-                  <td>
-                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                      <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Full Order Items Breakdown"><i class="fas fa-eye"></i> View</button>
-                      <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery"><i class="fas fa-truck"></i> Deliver</button>
-                      ${!is100Paid ? `
-                        <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment"><i class="fas fa-wallet"></i> Pay</button>
-                      ` : ''}
-                      <button class="btn btn-success btn-sm" onclick="openOrderCommsModal('${o.Order_ID}')" title="Send WhatsApp / Email"><i class="fas fa-paper-plane"></i></button>
-                    </div>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
+          <tbody id="orders-table-tbody">
+            ${renderOrderTableRows(filteredOrders)}
           </tbody>
         </table>
       </div>
@@ -4300,30 +4462,73 @@ h1, h2, h3, h4, h5, h6 {
 </script>
   <script>
 (function() {
-    function renderInventory(container) {
-    const role = state.currentUser.Role;
+  window._parsedCsvInventory = [];
+
+  function filterInventoryTable(query) {
+    state.filters.inventory = query;
+    const q = (query || "").toLowerCase();
+    const filtered = state.inventory.filter(p => 
+      (p.Product_Name || "").toLowerCase().includes(q) ||
+      (p.SKU_Code || "").toLowerCase().includes(q) ||
+      (p.Category || "").toLowerCase().includes(q)
+    );
+    const tbody = document.getElementById("inventory-table-tbody");
+    const countEl = document.getElementById("inventory-count-showing");
+    if (tbody) tbody.innerHTML = renderInventoryTableRows(filtered);
+    if (countEl) countEl.textContent = filtered.length;
+  }
+  window.filterInventoryTable = filterInventoryTable;
+
+  function renderInventoryTableRows(items) {
+    if (!items || items.length === 0) {
+      return `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--text-muted);">No products found in inventory.</td></tr>`;
+    }
+
+    return items.map(p => `
+      <tr>
+        <td><strong>${p.SKU_Code || '-'}</strong></td>
+        <td><strong>${p.Product_Name || '-'}</strong></td>
+        <td><span class="badge badge-on-hold">${p.Category || 'General'}</span></td>
+        <td>${p.Unit || p.Default_UOM || 'Pcs'}</td>
+        <td><strong>₹${Number(p.Unit_Price || 0).toLocaleString()}</strong></td>
+        <td><span class="badge badge-on-hold">${p.GSTRate || 18}%</span></td>
+        <td><strong style="font-size: 1.05rem;">${p.Current_Stock !== undefined ? p.Current_Stock : 0}</strong></td>
+        <td><span style="font-size:0.8rem; color:var(--text-muted);">${p.Last_Updated || '-'}</span></td>
+        <td>
+          <span class="badge ${Number(p.Current_Stock || 0) > 20 ? 'badge-active' : 'badge-danger'}">
+            ${Number(p.Current_Stock || 0) > 20 ? 'In Stock' : 'Low Stock'}
+          </span>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function renderInventory(container) {
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
+    const role = state.currentUser ? state.currentUser.Role : "EXECUTIVE";
     const canUpload = role === "ADMIN" || role === "MANAGER" || role === "ACCOUNTS";
     const filterQuery = (state.filters.inventory || "").toLowerCase();
     const filteredInventory = state.inventory.filter(p => 
-      p.Product_Name.toLowerCase().includes(filterQuery) ||
-      p.SKU_Code.toLowerCase().includes(filterQuery) ||
-      p.Category.toLowerCase().includes(filterQuery)
+      (p.Product_Name || "").toLowerCase().includes(filterQuery) ||
+      (p.SKU_Code || "").toLowerCase().includes(filterQuery) ||
+      (p.Category || "").toLowerCase().includes(filterQuery)
     );
 
     container.innerHTML = `
       <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem;">
         ${canUpload ? `
-          <button class="btn btn-secondary" onclick="showToast('Stock upload feature will be configured later.', 'info')"><i class="fas fa-file-excel"></i> Bulk CSV Upload (Admin/Manager)</button>
+          <button class="btn btn-primary" onclick="openInventoryCsvModal()"><i class="fas fa-file-csv"></i> Bulk CSV Upload (Admin/Manager)</button>
         ` : `<span style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-lock"></i> Upload restricted to Admin/Manager</span>`}
       </div>
 
       <!-- Filter Bar -->
       <div class="tab-filter-bar">
-        <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 350px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 380px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" class="form-control" placeholder="Search by Product Name, SKU, Category..." value="${state.filters.inventory}" oninput="state.filters.inventory = this.value; renderInventory(document.getElementById('app-content'))">
+          <input type="text" class="form-control" placeholder="Search by Product Name, SKU, Category..." value="${state.filters.inventory || ''}" oninput="filterInventoryTable(this.value)">
         </div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong>${filteredInventory.length}</strong> of ${state.inventory.length} items</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong id="inventory-count-showing">${filteredInventory.length}</strong> of ${state.inventory.length} items</div>
       </div>
 
       <div class="table-wrapper">
@@ -4341,24 +4546,8 @@ h1, h2, h3, h4, h5, h6 {
               <th>Status</th>
             </tr>
           </thead>
-          <tbody>
-            ${filteredInventory.map(p => `
-              <tr>
-                <td><strong>${p.SKU_Code}</strong></td>
-                <td><strong>${p.Product_Name}</strong></td>
-                <td><span class="badge badge-on-hold">${p.Category}</span></td>
-                <td>${p.Default_UOM || 'Pcs'}</td>
-                <td><strong>₹${Number(p.Unit_Price).toLocaleString()}</strong></td>
-                <td><span class="badge badge-on-hold">${p.GSTRate || 18}%</span></td>
-                <td><strong style="font-size: 1.05rem;">${p.Current_Stock}</strong></td>
-                <td><span style="font-size:0.8rem; color:var(--text-muted);">${p.Last_Updated || '-'}</span></td>
-                <td>
-                  <span class="badge ${p.Current_Stock > 20 ? 'badge-active' : 'badge-danger'}">
-                    ${p.Current_Stock > 20 ? 'In Stock' : 'Low Stock'}
-                  </span>
-                </td>
-              </tr>
-            `).join('')}
+          <tbody id="inventory-table-tbody">
+            ${renderInventoryTableRows(filteredInventory)}
           </tbody>
         </table>
       </div>
@@ -4366,8 +4555,262 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   /**
-   * 5. PAYMENT COLLECTIONS VIEW (WITH EMAIL/WHATSAPP COMM TRIGGER)
+   * INVENTORY CSV UPLOAD MODAL & PARSER
    */
+  function openInventoryCsvModal() {
+    window._parsedCsvInventory = [];
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 760px;">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-file-csv" style="color: var(--primary); margin-right: 0.5rem;"></i> Bulk Inventory Upload (CSV)</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            <!-- Template Download & Guidance Banner -->
+            <div style="background: var(--bg-primary); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.9rem; color: var(--text-main);">Standard Inventory Template</div>
+                <div style="font-size: 0.78rem; color: var(--text-muted);">Columns: SKU_Code, Product_Name, Category, Unit, Unit_Price, Current_Stock, GSTRate, Min_Stock_Alert</div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="downloadSampleInventoryCsv()"><i class="fas fa-download"></i> Download Template CSV</button>
+            </div>
+
+            <!-- Upload File Dropzone -->
+            <div class="form-group">
+              <label class="form-label">Select CSV File</label>
+              <div style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 24px; text-align: center; background: var(--bg-primary); cursor: pointer;" onclick="document.getElementById('inv-csv-input').click()">
+                <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; color: var(--primary); margin-bottom: 8px;"></i>
+                <div style="font-weight: 600; color: var(--text-main); font-size: 0.9rem;" id="inv-csv-filename">Click or Drag & Drop .CSV file here</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Supports comma-separated UTF-8 CSV files</div>
+                <input type="file" id="inv-csv-input" accept=".csv,text/csv" style="display: none;" onchange="handleInventoryCsvFile(this)">
+              </div>
+            </div>
+
+            <!-- Paste CSV Alternative -->
+            <details style="margin-bottom: 16px;">
+              <summary style="font-size: 0.8rem; color: var(--primary); cursor: pointer; font-weight: 600;">Or Paste CSV Raw Text Directly</summary>
+              <div style="margin-top: 8px;">
+                <textarea id="inv-csv-raw" class="form-control" rows="4" placeholder="SKU_Code,Product_Name,Category,Unit,Unit_Price,Current_Stock,GSTRate,Min_Stock_Alert&#10;PRD-006,Industrial Angle Grinder 850W,Power Tools,Pcs,2800,50,18,10" style="font-family: monospace; font-size: 0.8rem;"></textarea>
+                <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 6px;" onclick="parseRawInventoryCsv()"><i class="fas fa-magic"></i> Parse Pasted Text</button>
+              </div>
+            </details>
+
+            <!-- Preview Table of Parsed Records -->
+            <div id="inv-csv-preview-container" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="font-size: 0.85rem; color: var(--text-main);"><i class="fas fa-list-check" style="color: var(--success);"></i> Preview Parsed Products (<span id="inv-csv-parsed-count">0</span>)</strong>
+                <span class="badge badge-success" id="inv-csv-status-badge">Valid CSV</span>
+              </div>
+              <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+                <table class="data-table" style="font-size: 0.78rem;">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Product Name</th>
+                      <th>Category</th>
+                      <th>Unit</th>
+                      <th>Price</th>
+                      <th>Stock</th>
+                      <th>GST</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inv-csv-preview-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="inv-csv-submit-btn" disabled onclick="submitInventoryCsvUpload()"><i class="fas fa-check"></i> Import & Sync to Google Sheets</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  window.openInventoryCsvModal = openInventoryCsvModal;
+
+  function downloadSampleInventoryCsv() {
+    const csvContent = "SKU_Code,Product_Name,Category,Unit,Unit_Price,Current_Stock,GSTRate,Min_Stock_Alert\n" +
+      "PRD-001,Heavy Duty Drill Machine 750W,Power Tools,Pcs,3450,45,18,10\n" +
+      "PRD-002,Rotary Hammer 800W SDS Plus,Power Tools,Pcs,4800,28,18,8\n" +
+      "PRD-003,Angle Grinder 4-Inch 850W,Power Tools,Pcs,2200,60,18,15\n" +
+      "PRD-004,Impact Wrench 1/2-Inch Drive,Pneumatic Tools,Pcs,6500,18,18,5\n" +
+      "PRD-005,Cordless Drill Driver 12V Li-ion,Power Tools,Pcs,3900,32,18,10";
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.setAttribute("download", "nexallot_inventory_template.csv");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  window.downloadSampleInventoryCsv = downloadSampleInventoryCsv;
+
+  function parseCsvText(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return [];
+
+    const parseLine = (line) => {
+      const result = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          inQuotes = !inQuotes;
+        } else if (c === ',' && !inQuotes) {
+          result.push(cur.trim());
+          cur = '';
+        } else {
+          cur += c;
+        }
+      }
+      result.push(cur.trim());
+      return result;
+    };
+
+    const headers = parseLine(lines[0]).map(h => h.replace(/^["']|["']$/g, '').trim());
+    const headerMap = {};
+    headers.forEach((h, idx) => {
+      const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (clean.includes('sku')) headerMap['sku'] = idx;
+      else if (clean.includes('name') || clean.includes('product') || clean.includes('title')) headerMap['name'] = idx;
+      else if (clean.includes('cat')) headerMap['category'] = idx;
+      else if (clean.includes('unit') || clean.includes('uom')) headerMap['unit'] = idx;
+      else if (clean.includes('price') || clean.includes('rate')) headerMap['price'] = idx;
+      else if (clean.includes('stock') || clean.includes('qty')) headerMap['stock'] = idx;
+      else if (clean.includes('gst') || clean.includes('tax')) headerMap['gst'] = idx;
+      else if (clean.includes('min') || clean.includes('alert')) headerMap['minStock'] = idx;
+    });
+
+    const items = [];
+    for (let r = 1; r < lines.length; r++) {
+      const cols = parseLine(lines[r]);
+      if (cols.length < 2) continue;
+      const sku = (cols[headerMap['sku'] !== undefined ? headerMap['sku'] : 0] || '').replace(/^["']|["']$/g, '').trim();
+      const name = (cols[headerMap['name'] !== undefined ? headerMap['name'] : 1] || '').replace(/^["']|["']$/g, '').trim();
+      if (!sku && !name) continue;
+
+      items.push({
+        SKU_Code: sku || ("SKU-" + Math.floor(1000 + Math.random() * 9000)),
+        Product_Name: name || "Unnamed Product",
+        Category: (cols[headerMap['category']] || 'General').replace(/^["']|["']$/g, '').trim(),
+        Unit: (cols[headerMap['unit']] || 'Pcs').replace(/^["']|["']$/g, '').trim(),
+        Unit_Price: Number((cols[headerMap['price']] || '0').replace(/[^0-9.]/g, '')) || 0,
+        Current_Stock: Number((cols[headerMap['stock']] || '0').replace(/[^0-9.]/g, '')) || 0,
+        GSTRate: Number((cols[headerMap['gst']] || '18').replace(/[^0-9.]/g, '')) || 18,
+        Min_Stock_Alert: Number((cols[headerMap['minStock']] || '5').replace(/[^0-9.]/g, '')) || 5
+      });
+    }
+    return items;
+  }
+
+  function handleInventoryCsvFile(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const nameLabel = document.getElementById("inv-csv-filename");
+    if (nameLabel) nameLabel.innerHTML = `<i class="fas fa-file-csv" style="color:var(--success);"></i> ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const content = e.target.result;
+      const parsed = parseCsvText(content);
+      displayCsvPreview(parsed);
+    };
+    reader.readAsText(file);
+  }
+  window.handleInventoryCsvFile = handleInventoryCsvFile;
+
+  function parseRawInventoryCsv() {
+    const raw = document.getElementById("inv-csv-raw") ? document.getElementById("inv-csv-raw").value : "";
+    if (!raw.trim()) {
+      showToast("Please paste CSV text first.", "warning");
+      return;
+    }
+    const parsed = parseCsvText(raw);
+    displayCsvPreview(parsed);
+  }
+  window.parseRawInventoryCsv = parseRawInventoryCsv;
+
+  function displayCsvPreview(items) {
+    window._parsedCsvInventory = items;
+    const container = document.getElementById("inv-csv-preview-container");
+    const tbody = document.getElementById("inv-csv-preview-tbody");
+    const countEl = document.getElementById("inv-csv-parsed-count");
+    const submitBtn = document.getElementById("inv-csv-submit-btn");
+
+    if (!items || items.length === 0) {
+      if (container) container.style.display = "none";
+      if (submitBtn) submitBtn.disabled = true;
+      showToast("No valid products detected in CSV. Please verify header row.", "warning");
+      return;
+    }
+
+    if (countEl) countEl.textContent = items.length;
+    if (tbody) {
+      tbody.innerHTML = items.map(p => `
+        <tr>
+          <td><strong>${p.SKU_Code}</strong></td>
+          <td>${p.Product_Name}</td>
+          <td>${p.Category}</td>
+          <td>${p.Unit}</td>
+          <td>₹${p.Unit_Price.toLocaleString()}</td>
+          <td><strong>${p.Current_Stock}</strong></td>
+          <td>${p.GSTRate}%</td>
+        </tr>
+      `).join('');
+    }
+    if (container) container.style.display = "block";
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `<i class="fas fa-check"></i> Import & Sync ${items.length} Products`;
+    }
+    showToast(`Parsed ${items.length} products from CSV!`, "success");
+  }
+
+  async function submitInventoryCsvUpload() {
+    const items = window._parsedCsvInventory;
+    if (!items || items.length === 0) return;
+
+    const btn = document.getElementById("inv-csv-submit-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading to Google Sheets...';
+    }
+
+    // 1. Update local state inventory immediately (upsert by SKU)
+    const timeStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    items.forEach(newItem => {
+      const idx = state.inventory.findIndex(p => (p.SKU_Code || "").toUpperCase() === newItem.SKU_Code.toUpperCase());
+      const record = { ...newItem, Last_Updated: timeStr };
+      if (idx >= 0) {
+        state.inventory[idx] = { ...state.inventory[idx], ...record };
+      } else {
+        state.inventory.push(record);
+      }
+    });
+
+    closeModal();
+    renderInventory(document.getElementById("app-content"));
+    showToast(`✅ Successfully imported ${items.length} inventory products!`, "success");
+
+    // 2. Sync to Google Sheets Database
+    if (typeof syncRecordToBackend === 'function') {
+      try {
+        const res = await syncRecordToBackend('upload_inventory_bulk', { items: items });
+        if (res && res.success) {
+          showToast(`Synced ${items.length} products to live Google Sheet!`, "success");
+        }
+      } catch(e) {
+        console.warn("Inventory sheet sync notice:", e);
+      }
+    }
+  }
+  window.submitInventoryCsvUpload = submitInventoryCsvUpload;
 
   window.renderInventory = renderInventory;
   window.openNewProductModal = typeof openNewProductModal !== 'undefined' ? openNewProductModal : function() { showToast("Add Product feature available in Admin console.", "info"); };
