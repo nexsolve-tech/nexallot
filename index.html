@@ -1874,7 +1874,22 @@ h1, h2, h3, h4, h5, h6 {
 
   <!-- Modular Frontend Scripts (Each strictly sized under 50KB for Apps Script AST compliance) -->
   <script>
-// Complete Master & Operational Store
+  // Indian State & Union Territory GST Code Map (Standard GSTIN prefix)
+  const GST_STATE_MAP = {
+    "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+    "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+    "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+    "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+    "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+    "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "26": "Dadra & Nagar Haveli and Daman & Diu", "27": "Maharashtra", "28": "Andhra Pradesh",
+    "29": "Karnataka", "30": "Goa", "31": "Lakshadweep", "32": "Kerala",
+    "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman & Nicobar Islands",
+    "36": "Telangana", "37": "Andhra Pradesh (New)", "38": "Ladakh"
+  };
+  window.GST_STATE_MAP = GST_STATE_MAP;
+
+  // Complete Master & Operational Store
   const state = {
     currentUser: {
       User_ID: "USR-102",
@@ -1886,8 +1901,13 @@ h1, h2, h3, h4, h5, h6 {
       Branch_Area: "North Zone"
     },
     company: {
-      name: "Apex Global Enterprises",
-      email: "orders@apexglobal.com",
+      name: localStorage.getItem("nexallot_company_name") || "Apex Global Enterprises",
+      email: localStorage.getItem("nexallot_company_email") || "orders@apexglobal.com",
+      gstin: localStorage.getItem("nexallot_company_gstin") || "08AAACA1234A1Z5", // Dynamic: 08 for Rajasthan, 24 for Gujarat, etc.
+      state: localStorage.getItem("nexallot_company_state") || "Rajasthan",
+      stateCode: localStorage.getItem("nexallot_company_state_code") || "08",
+      phone: localStorage.getItem("nexallot_company_phone") || "+91 98765 43210",
+      address: localStorage.getItem("nexallot_company_address") || "Industrial Estate, Phase 1",
       licenseKey: "FF-2026-X892-PRO",
       expiryDate: "2027-09-30",
       maxUsers: 150
@@ -2088,6 +2108,34 @@ h1, h2, h3, h4, h5, h6 {
         Attachment: "",
         Created_Date: "2024-08-14",
         Notes: "Hold placed due to overdue balance exceeding 60 days."
+      },
+      {
+        Client_ID: "CUST-1006",
+        Client_Name: "Marwar Tools & Industrial Bearings",
+        Account_Type: "Dealer / Distributor",
+        Industry: "Hardware & Electricals",
+        Contact_Person: "Mr. Rajendra Gehlot",
+        Contact_Designation: "Managing Partner",
+        Phone: "9829012345",
+        Alternate_Phone: "0291-2431122",
+        Email: "marwartools@gmail.com",
+        GSTIN: "08AAACR1234F1Z9",
+        PAN: "AAACR1234F",
+        Credit_Limit: 350000,
+        Payment_Terms: "Net 30 Days",
+        Price_Tier: "Tier A (Distributor Price)",
+        Outstanding_Balance: 24000,
+        Address_Line: "Plot 55, Heavy Industrial Area, Phase II",
+        City_Area: "Jodhpur",
+        State_Name: "Rajasthan",
+        Pincode: "342003",
+        GPS_Location: "26.2389, 73.0243",
+        Assigned_User_ID: "USR-102",
+        Status: "ACTIVE",
+        Visit_Frequency: "Weekly",
+        Attachment: "",
+        Created_Date: "2025-02-15",
+        Notes: "Primary authorized distributor for Western Rajasthan territory."
       }
     ],
 
@@ -2308,6 +2356,125 @@ h1, h2, h3, h4, h5, h6 {
     showToast('Switched view to ' + role + ': ' + state.currentUser.Full_Name, "info");
   }
   window.handleRoleSwitch = handleRoleSwitch;
+
+  /**
+   * DYNAMIC TAX ENGINE: INTRA-STATE (CGST + SGST) vs INTER-STATE (IGST)
+   * Dynamically adapts to any seller state (Rajasthan, Gujarat, Maharashtra, Delhi, etc.)
+   */
+  function getCompanyTaxDetails() {
+    const compGstin = String(state.company.gstin || localStorage.getItem("nexallot_company_gstin") || "").trim().toUpperCase();
+    let compStateCode = "";
+    if (compGstin.length >= 2 && /^\d{2}/.test(compGstin)) {
+      compStateCode = compGstin.substring(0, 2);
+    } else {
+      compStateCode = String(state.company.stateCode || localStorage.getItem("nexallot_company_state_code") || "").trim();
+    }
+    if (!compStateCode && (state.company.state || localStorage.getItem("nexallot_company_state"))) {
+      const sName = (state.company.state || localStorage.getItem("nexallot_company_state") || "").toLowerCase().trim();
+      const foundCode = Object.keys(GST_STATE_MAP).find(code => GST_STATE_MAP[code].toLowerCase() === sName);
+      if (foundCode) compStateCode = foundCode;
+    }
+    // Dynamic fallback if nothing configured
+    if (!compStateCode) {
+      compStateCode = "08"; // Default: 08 (Rajasthan)
+    }
+    const compStateName = GST_STATE_MAP[compStateCode] || state.company.state || "Registered State";
+    return {
+      gstin: compGstin,
+      stateCode: compStateCode,
+      stateName: compStateName
+    };
+  }
+  window.getCompanyTaxDetails = getCompanyTaxDetails;
+
+  function determineCustomerTaxType(client) {
+    const comp = getCompanyTaxDetails();
+    if (!client) {
+      return { 
+        isIntra: true, 
+        type: "INTRA", 
+        label: "Intra-State (CGST + SGST)", 
+        companyState: comp.stateName, 
+        companyStateCode: comp.stateCode, 
+        clientState: comp.stateName, 
+        clientStateCode: comp.stateCode,
+        clientGstin: ""
+      };
+    }
+
+    const clientGstin = String(client.GSTIN || "").trim().toUpperCase();
+    let clientStateCode = "";
+    let clientStateName = client.State || "";
+
+    // 1. Try from first 2 digits of GSTIN
+    if (clientGstin.length >= 2 && /^\d{2}/.test(clientGstin)) {
+      clientStateCode = clientGstin.substring(0, 2);
+      clientStateName = GST_STATE_MAP[clientStateCode] || clientStateName;
+    } 
+    // 2. Try matching client.State string against state map
+    else if (clientStateName) {
+      const foundCode = Object.keys(GST_STATE_MAP).find(code => 
+        GST_STATE_MAP[code].toLowerCase() === clientStateName.toLowerCase() ||
+        clientStateName.toLowerCase().includes(GST_STATE_MAP[code].toLowerCase())
+      );
+      if (foundCode) {
+        clientStateCode = foundCode;
+      }
+    }
+
+    // Comparison: If State Codes match or State Names match -> Intra-state
+    let isIntra = true;
+    if (clientStateCode && comp.stateCode) {
+      isIntra = (clientStateCode === comp.stateCode);
+    } else if (clientStateName && comp.stateName) {
+      isIntra = (clientStateName.toLowerCase().trim() === comp.stateName.toLowerCase().trim());
+    }
+
+    return {
+      isIntra: isIntra,
+      type: isIntra ? "INTRA" : "INTER",
+      label: isIntra ? "Intra-State (CGST + SGST)" : "Inter-State (IGST)",
+      companyState: comp.stateName,
+      companyStateCode: comp.stateCode,
+      clientState: clientStateName || (isIntra ? comp.stateName : "Other State"),
+      clientStateCode: clientStateCode || (isIntra ? comp.stateCode : "--"),
+      clientGstin: clientGstin
+    };
+  }
+  window.determineCustomerTaxType = determineCustomerTaxType;
+
+  /**
+   * ROLE-BASED DATA SCOPING ENGINE
+   * Executive: strictly own records
+   * Manager: own records + reporting subordinates
+   * Admin/Accounts: global company-wide records
+   */
+  function getRoleScopedRecords(list, userField = "User_ID") {
+    if (!Array.isArray(list)) return [];
+    const currentUser = state.currentUser || { Role: "ADMIN", User_ID: "USR-100" };
+    const role = currentUser.Role || "ADMIN";
+
+    if (role === "ADMIN" || role === "ACCOUNTS") {
+      return list;
+    }
+
+    if (role === "EXECUTIVE") {
+      return list.filter(item => String(item[userField] || "").trim() === String(currentUser.User_ID).trim());
+    }
+
+    if (role === "MANAGER") {
+      const managedIds = [String(currentUser.User_ID).trim()];
+      (state.users || []).forEach(u => {
+        if (String(u.Manager_ID || "").trim() === String(currentUser.User_ID).trim()) {
+          managedIds.push(String(u.User_ID).trim());
+        }
+      });
+      return list.filter(item => managedIds.includes(String(item[userField] || "").trim()));
+    }
+
+    return list;
+  }
+  window.getRoleScopedRecords = getRoleScopedRecords;
 
   function refreshCurrentView() {
     const icon = document.getElementById("header-refresh-icon");
@@ -2986,7 +3153,8 @@ h1, h2, h3, h4, h5, h6 {
   window._dashSearchQuery = window._dashSearchQuery || "";
 
   function getFilteredDashOrders() {
-    const ordersList = state.orders || [];
+    const rawOrders = state.orders || [];
+    const ordersList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawOrders, "User_ID") : rawOrders;
     const q = (window._dashSearchQuery || "").toLowerCase().trim();
     const status = window._dashFilterStatus || "ALL";
 
@@ -3032,7 +3200,7 @@ h1, h2, h3, h4, h5, h6 {
               ${is100Paid ? '100% Paid' : 'Due: ₹' + balance.toLocaleString()}
             </span>
           </td>
-          <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : 'badge-pending'}">${o.Delivery_Status || 'PENDING'}</span></td>
+          <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : (o.Delivery_Status === 'PARTIAL_DELIVERED' ? 'badge-on-hold' : 'badge-pending')}">${o.Delivery_Status || 'PENDING'}</span></td>
           <td style="white-space: nowrap;">
             <div style="display: inline-flex; align-items: center; gap: 6px;">
               <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Order Breakdown" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
@@ -3040,6 +3208,9 @@ h1, h2, h3, h4, h5, h6 {
               </button>
               <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery Status" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
                 <i class="fas fa-truck"></i>
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="openMaterialReturnModal('${o.Order_ID}')" title="Material Return / Rejection" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: #f43f5e;">
+                <i class="fas fa-undo-alt"></i>
               </button>
               ${!is100Paid ? `
                 <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
@@ -3087,10 +3258,17 @@ h1, h2, h3, h4, h5, h6 {
   function renderDashboard(container) {
     if (!container) container = document.getElementById("app-content");
     if (!container) return;
-    const ordersList = state.orders || [];
-    const paymentsList = state.payments || [];
-    const expensesList = state.expenses || [];
-    const visitsList = state.visits || [];
+
+    const rawOrders = state.orders || [];
+    const rawPayments = state.payments || [];
+    const rawExpenses = state.expenses || [];
+    const rawVisits = state.visits || [];
+
+    // Hierarchical role-based data scoping
+    const ordersList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawOrders, "User_ID") : rawOrders;
+    const paymentsList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawPayments, "User_ID") : rawPayments;
+    const expensesList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawExpenses, "User_ID") : rawExpenses;
+    const visitsList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawVisits, "User_ID") : rawVisits;
 
     const totalOrders = ordersList.reduce((sum, o) => sum + Number(o.Total_Amount || 0), 0);
     const totalPayments = paymentsList.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
@@ -3103,6 +3281,12 @@ h1, h2, h3, h4, h5, h6 {
     const deliveredCount = ordersList.filter(o => (o.Delivery_Status || '') === 'DELIVERED').length;
     const paymentDueCount = ordersList.filter(o => (Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0)) > 0).length;
     const paidCount = ordersList.filter(o => (Number(o.Total_Amount || 0) - Number(o.Paid_Amount || 0)) <= 0).length;
+
+    const curRole = state.currentUser ? (state.currentUser.Role || "ADMIN") : "ADMIN";
+    const curUserName = state.currentUser ? (state.currentUser.Full_Name || "User") : "Admin";
+    const roleScopeText = curRole === "EXECUTIVE"
+      ? `Personal Scope (${curUserName})`
+      : (curRole === "MANAGER" ? `Team Scope (${curUserName}'s Team)` : `Global Company Scope (All Data)`);
 
     container.innerHTML = `
       ${state.activeVisit ? `
@@ -3154,8 +3338,8 @@ h1, h2, h3, h4, h5, h6 {
       </div>
 
       <div class="card">
-        <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
-          <h3 class="card-title"><i class="fas fa-bolt" style="color: var(--primary); margin-right: 0.5rem;"></i> Quick Operations Hub</h3>
+        <div class="card-header" style="flex-wrap: wrap; gap: 12px; align-items: center;">
+          <h3 class="card-title" style="margin: 0;"><i class="fas fa-bolt" style="color: var(--primary); margin-right: 0.5rem;"></i> Quick Operations Hub <span class="badge badge-info" style="font-size: 0.72rem; margin-left: 8px; vertical-align: middle; font-weight: 600;"><i class="fas fa-user-shield"></i> ${roleScopeText}</span></h3>
           <div style="display: flex; gap: 0.5rem;">
             ${!state.activeVisit ? `<button class="btn btn-primary btn-sm" onclick="openNewVisitModal()"><i class="fas fa-map-marker-alt"></i> New Check-In</button>` : ''}
             <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal()"><i class="fas fa-cart-plus"></i> Book Order</button>
@@ -3707,6 +3891,9 @@ h1, h2, h3, h4, h5, h6 {
                 <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery Status" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
                   <i class="fas fa-truck"></i>
                 </button>
+                <button class="btn btn-secondary btn-sm" onclick="openMaterialReturnModal('${o.Order_ID}')" title="Material Return / Rejection" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: #f43f5e;">
+                  <i class="fas fa-undo-alt"></i>
+                </button>
                 ${!is100Paid ? `
                   <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
                     <i class="fas fa-wallet"></i>
@@ -3777,27 +3964,34 @@ h1, h2, h3, h4, h5, h6 {
     function openOrderDetailsModal(orderId) {
     const order = state.orders.find(o => o.Order_ID === orderId);
     if (!order) return;
-    const client = getClient(order.Client_ID);
+    const client = state.clients.find(c => c.Client_ID === order.Client_ID) || getClient(order.Client_ID);
     const balance = Number(order.Total_Amount) - Number(order.Paid_Amount || 0);
+    const taxInfo = determineCustomerTaxType(client);
 
     const modal = document.getElementById("modal-container");
     modal.innerHTML = `
       <div class="modal-overlay show" id="active-modal">
-        <div class="modal-container" style="max-width: 720px;">
+        <div class="modal-container" style="max-width: 760px;">
           <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-file-invoice" style="color: var(--primary); margin-right: 0.5rem;"></i> Order Invoice Breakdown: ${order.Order_ID}</h3>
+            <h3 class="modal-title"><i class="fas fa-file-invoice" style="color: var(--primary); margin-right: 0.5rem;"></i> Order Tax Invoice: ${order.Order_ID}</h3>
             <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
           </div>
           <div class="modal-body">
-            <div style="display: flex; justify-content: space-between; background: var(--bg-primary); padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; background: var(--bg-primary); padding: 12px 16px; border-radius: 8px; margin-bottom: 10px;">
               <div>
                 <div><strong>Client:</strong> ${client ? client.Client_Name : order.Client_ID}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted);">Phone: ${client ? client.Phone : '-'} | Email: ${client ? client.Email : '-'}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">GSTIN: <span style="font-family:monospace; font-weight:600;">${client ? (client.GSTIN || 'Unregistered') : '-'}</span> | State: <strong>${taxInfo.clientState} (${taxInfo.clientStateCode})</strong></div>
               </div>
               <div style="text-align: right;">
                 <div><strong>Order Date:</strong> ${order.Date}</div>
                 <div style="font-size:0.8rem; color:var(--primary); font-weight:700;">Expected Delivery: ${order.Expected_Delivery_Date || 'Standard'}</div>
               </div>
+            </div>
+
+            <!-- Dynamic Tax Engine Indicator Badge -->
+            <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+              <span><i class="fas fa-landmark" style="color: var(--primary);"></i> Tax Engine: <strong>${taxInfo.label}</strong></span>
+              <span class="badge badge-info" style="font-size: 0.75rem;">Seller State: ${taxInfo.companyState} (${taxInfo.companyStateCode}) ⇄ Buyer State: ${taxInfo.clientState} (${taxInfo.clientStateCode})</span>
             </div>
 
             <!-- Items Table -->
@@ -3810,23 +4004,32 @@ h1, h2, h3, h4, h5, h6 {
                   <th>Qty</th>
                   <th>Disc %</th>
                   <th>Taxable</th>
-                  <th>GST</th>
+                  <th>${taxInfo.isIntra ? 'CGST + SGST' : 'IGST'}</th>
                   <th>Total</th>
                 </tr>
               </thead>
               <tbody>
-                ${order.Items.map((it, idx) => `
-                  <tr>
-                    <td>${idx + 1}</td>
-                    <td><strong>${it.name}</strong></td>
-                    <td>₹${it.price}</td>
-                    <td>${it.orderedQty} ${it.uom}</td>
-                    <td>${it.discountPct || 0}%</td>
-                    <td>₹${Number(it.taxableValue || (it.price * it.orderedQty)).toLocaleString()}</td>
-                    <td>${it.gstPct || 18}% (₹${Number(it.gstAmount || 0).toLocaleString()})</td>
-                    <td><strong>₹${Number(it.total).toLocaleString()}</strong></td>
-                  </tr>
-                `).join('')}
+                ${order.Items.map((it, idx) => {
+                  const gst = it.gstPct !== undefined ? it.gstPct : 18;
+                  const gstAmt = Number(it.gstAmount || 0);
+                  const halfAmt = Math.round(gstAmt / 2);
+                  const taxStr = taxInfo.isIntra
+                    ? `CGST ${gst/2}% (₹${halfAmt}) + SGST ${gst/2}% (₹${gstAmt - halfAmt})`
+                    : `IGST ${gst}% (₹${gstAmt.toLocaleString()})`;
+
+                  return `
+                    <tr>
+                      <td>${idx + 1}</td>
+                      <td><strong>${it.name}</strong></td>
+                      <td>₹${it.price}</td>
+                      <td>${it.orderedQty} ${it.uom}</td>
+                      <td>${it.discountPct || 0}%</td>
+                      <td>₹${Number(it.taxableValue || (it.price * it.orderedQty)).toLocaleString()}</td>
+                      <td style="font-size: 0.78rem;">${taxStr}</td>
+                      <td><strong>₹${Number(it.total).toLocaleString()}</strong></td>
+                    </tr>
+                  `;
+                }).join('')}
               </tbody>
             </table>
 
@@ -3844,10 +4047,21 @@ h1, h2, h3, h4, h5, h6 {
                 <span>Order-Level Discount:</span>
                 <span>- ₹${Number(order.Order_Discount_Amount || 0).toLocaleString()} ${order.Order_Discount_Pct ? `(${order.Order_Discount_Pct}%)` : ''}</span>
               </div>
-              <div class="calc-summary-row">
-                <span>Total GST Tax:</span>
-                <span>+ ₹${Number(order.Total_GST_Amount || 0).toLocaleString()}</span>
-              </div>
+              ${taxInfo.isIntra ? `
+                <div class="calc-summary-row">
+                  <span>Central GST (CGST):</span>
+                  <span>+ ₹${Number(Math.round((order.Total_GST_Amount || 0) / 2)).toLocaleString()}</span>
+                </div>
+                <div class="calc-summary-row">
+                  <span>State GST (SGST):</span>
+                  <span>+ ₹${Number(Math.round((order.Total_GST_Amount || 0) / 2)).toLocaleString()}</span>
+                </div>
+              ` : `
+                <div class="calc-summary-row">
+                  <span>Integrated GST (IGST):</span>
+                  <span>+ ₹${Number(order.Total_GST_Amount || 0).toLocaleString()}</span>
+                </div>
+              `}
               <div class="calc-summary-row grand">
                 <span>Final Order Amount:</span>
                 <span>₹${Number(order.Total_Amount).toLocaleString()}</span>
@@ -3858,6 +4072,19 @@ h1, h2, h3, h4, h5, h6 {
               </div>
             </div>
 
+            <!-- Material Return History if any -->
+            ${order.Returns && order.Returns.length > 0 ? `
+              <div style="margin-top: 14px; background: rgba(244, 63, 94, 0.05); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 8px; padding: 12px;">
+                <div style="font-weight: 700; font-size: 0.85rem; color: #f43f5e; margin-bottom: 6px;"><i class="fas fa-undo-alt"></i> Material Returns & Credit Notes:</div>
+                ${order.Returns.map(r => `
+                  <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px dashed rgba(244, 63, 94, 0.2);">
+                    <span><strong>${r.Return_ID}</strong> (${r.Date}) - Reason: ${r.Reason}</span>
+                    <strong style="color: #f43f5e;">Credit: - ₹${Number(r.Total_Credit_Amount).toLocaleString()}</strong>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
             ${order.Attachment ? `
               <div style="margin-top: 12px; font-size:0.85rem;">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('ORDER', '${order.Order_ID}')"><i class="fas fa-paperclip"></i> View Attached PO / Signature Proof</button>
@@ -3865,7 +4092,8 @@ h1, h2, h3, h4, h5, h6 {
             ` : ''}
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-success btn-sm" onclick="openOrderCommsModal('${order.Order_ID}')"><i class="fas fa-paper-plane"></i> Send Invoice (WhatsApp/Email)</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="closeModal(); openMaterialReturnModal('${order.Order_ID}')"><i class="fas fa-undo-alt"></i> Material Return</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="openOrderCommsModal('${order.Order_ID}')"><i class="fas fa-paper-plane"></i> Send Invoice</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
           </div>
         </div>
@@ -3889,6 +4117,7 @@ h1, h2, h3, h4, h5, h6 {
     const targetClientId = prePopulatedClientId || (state.activeVisit ? state.activeVisit.Client_ID : "");
     const targetClient = state.clients.find(c => c.Client_ID === targetClientId);
     const targetClientName = targetClient ? targetClient.Client_Name : "";
+    const taxInfo = determineCustomerTaxType(targetClient);
 
     // Default expected delivery date: 5 days from today
     const eddDate = new Date();
@@ -3900,7 +4129,7 @@ h1, h2, h3, h4, h5, h6 {
       <div class="modal-overlay show" id="active-modal">
         <div class="modal-container modal-lg">
           <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-shopping-cart" style="color: var(--primary); margin-right: 0.5rem;"></i> Book Sales Order (GST & Discount Engine)</h3>
+            <h3 class="modal-title"><i class="fas fa-shopping-cart" style="color: var(--primary); margin-right: 0.5rem;"></i> Book Sales Order (Dynamic GST Engine)</h3>
             <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
           </div>
           <form onsubmit="handleOrderSubmit(event)">
@@ -3924,6 +4153,12 @@ h1, h2, h3, h4, h5, h6 {
                   <label class="form-label">Expected Delivery Date (EDD) *</label>
                   <input type="date" class="form-control" id="o-edd" value="${eddStr}" required>
                 </div>
+              </div>
+
+              <!-- Dynamic GST Regime Indicator Badge -->
+              <div id="o-tax-indicator" style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 8px 12px; margin-top: 10px; font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                <span><i class="fas fa-landmark" style="color: var(--primary);"></i> Dynamic Tax Engine: <strong id="o-tax-regime-label">${taxInfo.label}</strong></span>
+                <span class="badge badge-info" id="o-tax-state-info">Seller State: ${taxInfo.companyState} (${taxInfo.companyStateCode}) ⇄ Buyer State: ${taxInfo.clientState} (${taxInfo.clientStateCode})</span>
               </div>
 
               <!-- Multi-Item Order Table Header -->
@@ -3958,9 +4193,17 @@ h1, h2, h3, h4, h5, h6 {
                   <span>Order Extra Discount:</span>
                   <span id="calc-order-disc">- ₹0 (0%)</span>
                 </div>
-                <div class="calc-summary-row">
-                  <span>Total GST (CGST + SGST):</span>
-                  <span id="calc-total-gst">+ ₹0</span>
+                <div class="calc-summary-row" id="calc-cgst-row" style="${taxInfo.isIntra ? '' : 'display:none;'}">
+                  <span>Central GST (CGST):</span>
+                  <span id="calc-cgst-amt">+ ₹0</span>
+                </div>
+                <div class="calc-summary-row" id="calc-sgst-row" style="${taxInfo.isIntra ? '' : 'display:none;'}">
+                  <span>State GST (SGST):</span>
+                  <span id="calc-sgst-amt">+ ₹0</span>
+                </div>
+                <div class="calc-summary-row" id="calc-igst-row" style="${taxInfo.isIntra ? 'display:none;' : ''}">
+                  <span>Integrated GST (IGST):</span>
+                  <span id="calc-igst-amt">+ ₹0</span>
                 </div>
                 <div class="calc-summary-row grand">
                   <span>Net Payable Amount:</span>
@@ -4000,7 +4243,7 @@ h1, h2, h3, h4, h5, h6 {
       opts.style.display = "block";
       opts.innerHTML = filtered.map(c => `
         <div class="search-select-option" onclick="selectOrderClient('${c.Client_ID}', '${c.Client_Name.replace(/'/g, "\\'")}')">
-          <strong>${c.Client_Name}</strong> <small style="color:var(--text-muted);">(${c.City_Area})</small>
+          <strong>${c.Client_Name}</strong> <small style="color:var(--text-muted);">(${c.City_Area || c.State_Name || ''})</small>
         </div>
       `).join('');
     } else {
@@ -4013,7 +4256,19 @@ h1, h2, h3, h4, h5, h6 {
     document.getElementById("o-client").value = id;
     const opts = document.getElementById("o-client-options");
     if (opts) opts.style.display = "none";
+    updateOrderTaxDisplay(id);
   }
+
+  function updateOrderTaxDisplay(clientId) {
+    const client = state.clients.find(c => c.Client_ID === clientId);
+    const taxInfo = determineCustomerTaxType(client);
+    const lbl = document.getElementById("o-tax-regime-label");
+    const info = document.getElementById("o-tax-state-info");
+    if (lbl) lbl.innerText = taxInfo.label;
+    if (info) info.innerText = `Seller State: ${taxInfo.companyState} (${taxInfo.companyStateCode}) ⇄ Buyer State: ${taxInfo.clientState} (${taxInfo.clientStateCode})`;
+    calculateCartGrandTotal();
+  }
+  window.updateOrderTaxDisplay = updateOrderTaxDisplay;
 
   function renderOrderCartRows() {
     const container = document.getElementById("order-items-container");
@@ -4213,10 +4468,31 @@ h1, h2, h3, h4, h5, h6 {
     const finalTaxable = Math.max(0, subtotalTaxable - extraDiscAmount);
     const finalGrandTotal = Math.round(finalTaxable + totalGST);
 
+    const curClientId = document.getElementById("o-client") ? document.getElementById("o-client").value : "";
+    const client = state.clients.find(c => c.Client_ID === curClientId);
+    const taxInfo = determineCustomerTaxType(client);
+
+    const cgstRow = document.getElementById("calc-cgst-row");
+    const sgstRow = document.getElementById("calc-sgst-row");
+    const igstRow = document.getElementById("calc-igst-row");
+
+    if (taxInfo.isIntra) {
+      if (cgstRow) cgstRow.style.display = "flex";
+      if (sgstRow) sgstRow.style.display = "flex";
+      if (igstRow) igstRow.style.display = "none";
+      const halfGst = Math.round(totalGST / 2);
+      if (document.getElementById("calc-cgst-amt")) document.getElementById("calc-cgst-amt").innerText = `+ ₹${halfGst.toLocaleString()}`;
+      if (document.getElementById("calc-sgst-amt")) document.getElementById("calc-sgst-amt").innerText = `+ ₹${(Math.round(totalGST) - halfGst).toLocaleString()}`;
+    } else {
+      if (cgstRow) cgstRow.style.display = "none";
+      if (sgstRow) sgstRow.style.display = "none";
+      if (igstRow) igstRow.style.display = "flex";
+      if (document.getElementById("calc-igst-amt")) document.getElementById("calc-igst-amt").innerText = `+ ₹${Math.round(totalGST).toLocaleString()}`;
+    }
+
     if (document.getElementById("calc-subtotal")) document.getElementById("calc-subtotal").innerText = `₹${Math.round(subtotalTaxable).toLocaleString()}`;
     if (document.getElementById("calc-item-disc")) document.getElementById("calc-item-disc").innerText = `- ₹${Math.round(totalItemDiscount).toLocaleString()}`;
     if (document.getElementById("calc-order-disc")) document.getElementById("calc-order-disc").innerText = `- ₹${extraDiscAmount.toLocaleString()} (${extraDiscPct}%)`;
-    if (document.getElementById("calc-total-gst")) document.getElementById("calc-total-gst").innerText = `+ ₹${Math.round(totalGST).toLocaleString()}`;
     if (document.getElementById("calc-grand-total")) document.getElementById("calc-grand-total").innerText = `₹${finalGrandTotal.toLocaleString()}`;
   }
 
@@ -4441,6 +4717,286 @@ h1, h2, h3, h4, h5, h6 {
     );
   }
 
+  /**
+   * =========================================================================
+   * 5. MATERIAL RETURN & QUALITY REJECTION FACILITY
+   * =========================================================================
+   */
+  function openMaterialReturnModal(orderId) {
+    const order = state.orders.find(o => o.Order_ID === orderId);
+    if (!order) return;
+    const client = state.clients.find(c => c.Client_ID === order.Client_ID) || {};
+    const taxInfo = determineCustomerTaxType(client);
+
+    const modal = document.getElementById("modal-container");
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 800px;">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-undo-alt" style="color: #f43f5e; margin-right: 0.5rem;"></i> Material Return & Rejection: ${orderId}</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <form onsubmit="handleMaterialReturnSubmit(event, '${orderId}')">
+            <div class="modal-body">
+              <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; background: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">
+                <div><strong>Client:</strong> ${client.Client_Name || order.Client_ID}</div>
+                <div><strong>Order Date:</strong> ${order.Date}</div>
+                <div><strong>Delivery Status:</strong> <span class="badge badge-info">${order.Delivery_Status || 'PENDING'}</span></div>
+              </div>
+
+              <div style="margin-bottom: 8px; font-weight: 700; font-size: 0.9rem;">
+                <i class="fas fa-box-open" style="color: var(--primary); margin-right: 4px;"></i> Select Line Items & Quantities to Return:
+              </div>
+              <table class="order-items-table">
+                <thead>
+                  <tr>
+                    <th>Item Description</th>
+                    <th>Rate</th>
+                    <th>Ordered</th>
+                    <th>Delivered</th>
+                    <th style="width: 100px;">Return Qty</th>
+                    <th>Taxable Credit</th>
+                    <th>Tax Reversal</th>
+                    <th>Total Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${order.Items.map((it, idx) => {
+                    const maxReturn = (it.deliveredQty && it.deliveredQty > 0) ? it.deliveredQty : it.orderedQty;
+                    return `
+                      <tr>
+                        <td><strong>${it.name}</strong><br><small style="color:var(--text-muted);">${it.sku}</small></td>
+                        <td>₹${it.price}</td>
+                        <td>${it.orderedQty} ${it.uom}</td>
+                        <td>${it.deliveredQty || 0} ${it.uom}</td>
+                        <td>
+                          <input type="number" class="form-control form-control-sm" id="ret-qty-${idx}" min="0" max="${maxReturn}" value="0" oninput="updateReturnCreditSummary('${orderId}')" style="width: 85px; font-weight: 700;">
+                        </td>
+                        <td id="ret-taxable-${idx}">₹0</td>
+                        <td id="ret-tax-${idx}">₹0</td>
+                        <td id="ret-tot-${idx}" style="font-weight: 700; color: #f43f5e;">₹0</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;">
+                <div class="form-group">
+                  <label class="form-label">Return Reason *</label>
+                  <select class="form-control" id="ret-reason" required>
+                    <option value="Damaged in Transit">Damaged in Transit / Transport Breakage</option>
+                    <option value="Defective / Quality Issue">Defective / Manufacturing Quality Issue</option>
+                    <option value="Wrong Item Supplied">Wrong Product / Specification Mismatch</option>
+                    <option value="Excess Delivery / Unsold Stock">Excess Delivery / Returned Unsold Stock</option>
+                    <option value="Customer Cancellation">Customer Cancellation / Order Rejected</option>
+                    <option value="Other">Other Specific Reason</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Inspection Remarks</label>
+                  <input type="text" class="form-control" id="ret-remarks" placeholder="Condition of returned boxes/goods...">
+                </div>
+              </div>
+
+              <!-- Automated Accounting & Restock Options -->
+              <div style="background: rgba(244, 63, 94, 0.05); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 8px; padding: 12px; margin-top: 8px;">
+                <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">
+                    <input type="checkbox" id="ret-opt-restock" checked>
+                    <span><i class="fas fa-boxes" style="color: var(--primary);"></i> Automatically restock returned items into Live Inventory</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">
+                    <input type="checkbox" id="ret-opt-credit" checked>
+                    <span><i class="fas fa-file-invoice-dollar" style="color: #f43f5e;"></i> Issue Credit Note & deduct credit value from Client Outstanding Due</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Credit Note Summary Box -->
+              <div class="calc-summary-box" style="margin-top: 12px;">
+                <div class="calc-summary-row">
+                  <span>Return Taxable Subtotal:</span>
+                  <span id="ret-summary-taxable">₹0</span>
+                </div>
+                <div class="calc-summary-row">
+                  <span>Tax Reversal (${taxInfo.isIntra ? 'CGST + SGST' : 'IGST'}):</span>
+                  <span id="ret-summary-tax">₹0</span>
+                </div>
+                <div class="calc-summary-row grand" style="color: #f43f5e;">
+                  <span>Total Credit Note Value:</span>
+                  <span id="ret-summary-total">₹0</span>
+                </div>
+              </div>
+
+              <!-- Attachment -->
+              <div class="form-group" style="margin-top: 12px;">
+                <label class="form-label"><i class="fas fa-camera"></i> Material Inspection Photo / Signed Return Challan Proof</label>
+                <div class="attachment-preview-box" onclick="document.getElementById('ret-file-input').click()">
+                  <i class="fas fa-cloud-upload-alt" style="font-size: 1.3rem; color: #f43f5e;"></i>
+                  <div style="font-size: 0.775rem; color: var(--text-muted);" id="ret-file-label">Upload inspection photo or challan</div>
+                  <img id="ret-file-img" style="display: none;">
+                  <input type="file" id="ret-file-input" accept="image/*" style="display: none;" onchange="handleFilePreview(this, 'ret-file-img', 'ret-file-label')">
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-danger"><i class="fas fa-undo"></i> Process Material Return & Issue Credit</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  function updateReturnCreditSummary(orderId) {
+    const order = state.orders.find(o => o.Order_ID === orderId);
+    if (!order) return;
+
+    let totalTaxable = 0;
+    let totalTax = 0;
+
+    order.Items.forEach((it, idx) => {
+      const qInput = document.getElementById(`ret-qty-${idx}`);
+      const returnQty = qInput ? (Number(qInput.value) || 0) : 0;
+      const rate = it.price || 0;
+      const disc = rate * ((it.discountPct || 0) / 100);
+      const taxablePerUnit = rate - disc;
+      const taxPerUnit = taxablePerUnit * ((it.gstPct !== undefined ? it.gstPct : 18) / 100);
+
+      const lineTaxable = returnQty * taxablePerUnit;
+      const lineTax = returnQty * taxPerUnit;
+      const lineTot = Math.round(lineTaxable + lineTax);
+
+      totalTaxable += lineTaxable;
+      totalTax += lineTax;
+
+      const taxableEl = document.getElementById(`ret-taxable-${idx}`);
+      const taxEl = document.getElementById(`ret-tax-${idx}`);
+      const totEl = document.getElementById(`ret-tot-${idx}`);
+      if (taxableEl) taxableEl.innerText = `₹${Math.round(lineTaxable).toLocaleString()}`;
+      if (taxEl) taxEl.innerText = `₹${Math.round(lineTax).toLocaleString()}`;
+      if (totEl) totEl.innerText = `₹${lineTot.toLocaleString()}`;
+    });
+
+    const totalCredit = Math.round(totalTaxable + totalTax);
+    if (document.getElementById("ret-summary-taxable")) document.getElementById("ret-summary-taxable").innerText = `₹${Math.round(totalTaxable).toLocaleString()}`;
+    if (document.getElementById("ret-summary-tax")) document.getElementById("ret-summary-tax").innerText = `₹${Math.round(totalTax).toLocaleString()}`;
+    if (document.getElementById("ret-summary-total")) document.getElementById("ret-summary-total").innerText = `₹${totalCredit.toLocaleString()}`;
+  }
+
+  function handleMaterialReturnSubmit(e, orderId) {
+    e.preventDefault();
+    const order = state.orders.find(o => o.Order_ID === orderId);
+    if (!order) return;
+
+    const reason = document.getElementById("ret-reason").value;
+    const remarks = document.getElementById("ret-remarks") ? document.getElementById("ret-remarks").value.trim() : "";
+    const shouldRestock = document.getElementById("ret-opt-restock") ? document.getElementById("ret-opt-restock").checked : true;
+    const shouldCredit = document.getElementById("ret-opt-credit") ? document.getElementById("ret-opt-credit").checked : true;
+    const returnImg = (document.getElementById("ret-file-img") ? document.getElementById("ret-file-img").src : "") || "";
+
+    const returnedItems = [];
+    let totalTaxable = 0;
+    let totalTax = 0;
+
+    order.Items.forEach((it, idx) => {
+      const qInput = document.getElementById(`ret-qty-${idx}`);
+      const returnQty = qInput ? (Number(qInput.value) || 0) : 0;
+      if (returnQty > 0) {
+        const rate = it.price || 0;
+        const disc = rate * ((it.discountPct || 0) / 100);
+        const taxablePerUnit = rate - disc;
+        const taxPerUnit = taxablePerUnit * ((it.gstPct !== undefined ? it.gstPct : 18) / 100);
+        const lineTaxable = returnQty * taxablePerUnit;
+        const lineTax = returnQty * taxPerUnit;
+        const lineTot = Math.round(lineTaxable + lineTax);
+
+        totalTaxable += lineTaxable;
+        totalTax += lineTax;
+
+        returnedItems.push({
+          sku: it.sku,
+          name: it.name,
+          uom: it.uom,
+          price: it.price,
+          returnedQty: returnQty,
+          taxableValue: lineTaxable,
+          taxAmount: lineTax,
+          totalRefund: lineTot
+        });
+
+        // Restock inventory if requested
+        if (shouldRestock) {
+          const inv = state.inventory.find(p => p.SKU_Code === it.sku);
+          if (inv) {
+            inv.Current_Stock = (Number(inv.Current_Stock) || 0) + returnQty;
+            inv.Last_Updated = new Date().toISOString().split('T')[0];
+          }
+        }
+
+        // Adjust deliveredQty if recorded
+        if (it.deliveredQty && it.deliveredQty >= returnQty) {
+          it.deliveredQty -= returnQty;
+        }
+      }
+    });
+
+    if (returnedItems.length === 0) {
+      showToast("Please enter a return quantity greater than 0 for at least one item.", "error");
+      return;
+    }
+
+    const totalCreditAmount = Math.round(totalTaxable + totalTax);
+    const returnEntry = {
+      Return_ID: "RET-" + Math.floor(1000 + Math.random() * 9000),
+      Date: new Date().toISOString().split('T')[0],
+      Reason: reason,
+      Remarks: remarks,
+      Items: returnedItems,
+      Total_Credit_Amount: totalCreditAmount,
+      Restocked: shouldRestock,
+      CreditIssued: shouldCredit,
+      Attachment: returnImg
+    };
+
+    order.Returns = order.Returns || [];
+    order.Returns.push(returnEntry);
+
+    // Adjust order total amount & client balance if credit issued
+    if (shouldCredit) {
+      order.Total_Amount = Math.max(0, (Number(order.Total_Amount) || 0) - totalCreditAmount);
+      const client = state.clients.find(c => c.Client_ID === order.Client_ID);
+      if (client) {
+        client.Outstanding_Balance = Math.max(0, (Number(client.Outstanding_Balance) || 0) - totalCreditAmount);
+      }
+    }
+
+    // Check delivery status
+    let allDelivered = 0;
+    let allOrdered = 0;
+    order.Items.forEach(it => {
+      allDelivered += (it.deliveredQty || 0);
+      allOrdered += it.orderedQty;
+    });
+
+    if (allDelivered === 0 && order.Returns.length > 0) {
+      order.Delivery_Status = "RETURNED";
+    } else {
+      order.Delivery_Status = "PARTIAL_RETURN";
+    }
+
+    closeModal();
+    renderView(state.currentView);
+    showToast(`Material return logged (${returnEntry.Return_ID})! Credit note of ₹${totalCreditAmount.toLocaleString()} generated.`, "success");
+
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_order', order);
+    }
+  }
+
   window.renderOrders = renderOrders;
   window.openOrderDetailsModal = openOrderDetailsModal;
   window.openNewOrderModal = openNewOrderModal;
@@ -4457,6 +5013,9 @@ h1, h2, h3, h4, h5, h6 {
   window.openDeliveryModal = openDeliveryModal;
   window.setDeliverAllItems = typeof setDeliverAllItems !== 'undefined' ? setDeliverAllItems : null;
   window.handleDeliverySubmit = handleDeliverySubmit;
+  window.openMaterialReturnModal = openMaterialReturnModal;
+  window.updateReturnCreditSummary = updateReturnCreditSummary;
+  window.handleMaterialReturnSubmit = handleMaterialReturnSubmit;
   window.openOrderCommsModal = openOrderCommsModal;
 })();
 </script>
@@ -4865,7 +5424,11 @@ h1, h2, h3, h4, h5, h6 {
                 <td><strong>${p.Payment_ID}</strong></td>
                 <td>${p.Date}</td>
                 <td><strong>${getClientName(p.Client_ID)}</strong></td>
-                <td>${p.Order_ID || 'General On-Account'}</td>
+                <td>
+                  ${p.Is_Advance || p.Payment_Type === 'ADVANCE_ON_ACCOUNT' || p.Order_ID === 'General On-Account' || !p.Order_ID 
+                    ? `<span class="badge badge-info" style="font-size:0.75rem;"><i class="fas fa-coins"></i> Advance / On-Account</span>` 
+                    : `<span class="badge badge-active" style="font-size:0.75rem;"><i class="fas fa-receipt"></i> ${p.Order_ID}</span>`}
+                </td>
                 <td><strong style="color: var(--success); font-size: 0.95rem;">₹${Number(p.Amount).toLocaleString()}</strong></td>
                 <td><span class="badge badge-on-hold">${p.Payment_Mode}</span></td>
                 <td>${p.Ref_Cheque_No || '-'}</td>
@@ -4913,6 +5476,19 @@ h1, h2, h3, h4, h5, h6 {
           <form onsubmit="handlePaymentSubmit(event)">
             <div class="modal-body">
               
+              <!-- Payment Collection Nature: Invoices vs Advance Deposit -->
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border: 1px solid var(--border-color);">
+                <span style="font-weight: 700; font-size: 0.85rem;"><i class="fas fa-coins" style="color: var(--primary);"></i> Collection Nature:</span>
+                <div style="display: flex; gap: 14px; align-items: center; font-size: 0.85rem;">
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600;">
+                    <input type="radio" name="p-type-radio" id="p-type-inv" value="INVOICE" checked onchange="handlePaymentTypeSwitch(this.value)"> Settle Outstanding Invoices
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600;">
+                    <input type="radio" name="p-type-radio" id="p-type-adv" value="ADVANCE" onchange="handlePaymentTypeSwitch(this.value)"> Advance Deposit / On-Account Credit
+                  </label>
+                </div>
+              </div>
+
               <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 12px;">
                 <!-- Searchable Client Name Field -->
                 <div class="form-group search-select-wrap">
@@ -4939,7 +5515,7 @@ h1, h2, h3, h4, h5, h6 {
               <div style="margin-top: 6px; margin-bottom: 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <label class="form-label" style="margin: 0; font-weight: 700;"><i class="fas fa-receipt" style="color: var(--primary); margin-right: 4px;"></i> Invoice / Order Settlement Allocation</label>
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="autoDistributePaymentAmount()"><i class="fas fa-magic"></i> Auto-Allocate (FIFO)</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="p-auto-alloc-btn" onclick="autoDistributePaymentAmount()"><i class="fas fa-magic"></i> Auto-Allocate (FIFO)</button>
                 </div>
                 <div id="p-settlement-container"></div>
               </div>
@@ -5187,42 +5763,72 @@ h1, h2, h3, h4, h5, h6 {
     if (document.getElementById("p-sum-advance")) document.getElementById("p-sum-advance").innerText = `₹${unallocated.toLocaleString()}`;
   }
 
+  function handlePaymentTypeSwitch(type) {
+    const isAdvance = (type === "ADVANCE");
+    const container = document.getElementById("p-settlement-container");
+    const autoBtn = document.getElementById("p-auto-alloc-btn");
+    if (autoBtn) autoBtn.style.display = isAdvance ? "none" : "inline-block";
+
+    if (isAdvance) {
+      if (container) {
+        container.innerHTML = `
+          <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 12px 14px; font-size: 0.85rem; color: #0369a1;">
+            <div style="font-weight: 700; margin-bottom: 3px;"><i class="fas fa-coins" style="color: var(--primary);"></i> Advance Deposit / On-Account Credit Mode</div>
+            <div>This payment will be credited to the customer's on-account balance to fund upcoming orders, advance booking commitments, or project advance. No invoice deduction will occur immediately.</div>
+          </div>
+        `;
+      }
+      updatePaymentAllocSummary();
+    } else {
+      const curClientId = document.getElementById("p-client") ? document.getElementById("p-client").value : "";
+      renderPaymentSettlementTable(curClientId);
+    }
+  }
+  window.handlePaymentTypeSwitch = handlePaymentTypeSwitch;
+
   function handlePaymentSubmit(e) {
     e.preventDefault();
     const clientId = document.getElementById("p-client").value;
     const amount = Number(document.getElementById("p-amount").value) || 0;
     const mode = document.getElementById("p-mode").value;
     const ref = document.getElementById("p-ref").value;
+    const isAdvance = document.getElementById("p-type-adv") ? document.getElementById("p-type-adv").checked : false;
 
     if (!clientId) { showToast("Please select a client.", "error"); return; }
     if (amount <= 0) { showToast("Please enter a valid received amount.", "error"); return; }
 
     const paymentId = "PAY-2026-" + Math.floor(1000 + Math.random() * 9000);
 
-    // Collect multi-order allocations
+    // Collect multi-order allocations if not in advance mode
     const allocations = [];
-    document.querySelectorAll('.p-order-alloc-input').forEach(input => {
-      const allocAmt = Number(input.value) || 0;
-      if (allocAmt > 0) {
-        const orderId = input.getAttribute('data-order-id');
-        allocations.push({ orderId: orderId, amount: allocAmt });
-        
-        // Update the order in state
-        const order = state.orders.find(o => o.Order_ID === orderId);
-        if (order) {
-          order.Paid_Amount = (Number(order.Paid_Amount) || 0) + allocAmt;
+    if (!isAdvance) {
+      document.querySelectorAll('.p-order-alloc-input').forEach(input => {
+        const allocAmt = Number(input.value) || 0;
+        if (allocAmt > 0) {
+          const orderId = input.getAttribute('data-order-id');
+          allocations.push({ orderId: orderId, amount: allocAmt });
+          
+          // Update the order in state
+          const order = state.orders.find(o => o.Order_ID === orderId);
+          if (order) {
+            order.Paid_Amount = (Number(order.Paid_Amount) || 0) + allocAmt;
+          }
         }
-      }
-    });
+      });
+    }
 
-    const orderRefSummary = allocations.length === 0 
-      ? "General On-Account" 
-      : (allocations.length === 1 ? allocations[0].orderId : allocations.map(a => a.orderId).join(", "));
+    const orderRefSummary = isAdvance 
+      ? "Advance Deposit / On-Account" 
+      : (allocations.length === 0 
+          ? "General On-Account" 
+          : (allocations.length === 1 ? allocations[0].orderId : allocations.map(a => a.orderId).join(", ")));
 
     const paymentDate = (document.getElementById("p-date") ? document.getElementById("p-date").value : "") || new Date().toISOString().split('T')[0];
     const newP = {
       Payment_ID: paymentId,
       Order_ID: orderRefSummary,
+      Is_Advance: isAdvance,
+      Payment_Type: isAdvance ? "ADVANCE_ON_ACCOUNT" : (allocations.length > 0 ? "INVOICE_SETTLEMENT" : "GENERAL_ON_ACCOUNT"),
       Allocations: allocations,
       Date: paymentDate,
       Client_ID: clientId,
@@ -5237,12 +5843,15 @@ h1, h2, h3, h4, h5, h6 {
 
     // Deduct client outstanding balance in state
     const client = state.clients.find(c => c.Client_ID === clientId);
-    if (client) client.Outstanding_Balance = Math.max(0, (client.Outstanding_Balance || 0) - amount);
+    if (client) client.Outstanding_Balance = (client.Outstanding_Balance || 0) - amount;
 
     state.payments.unshift(newP);
     closeModal();
     renderView(state.currentView);
-    showToast(`Payment receipt ₹${amount.toLocaleString()} recorded for ${paymentDate}!`, "success");
+    const toastMsg = isAdvance 
+      ? `Advance deposit of ₹${amount.toLocaleString()} credited to client on-account balance!`
+      : `Payment receipt ₹${amount.toLocaleString()} recorded for ${paymentDate}!`;
+    showToast(toastMsg, "success");
 
     // Asynchronously sync with Google Sheets Database
     if (typeof syncRecordToBackend === 'function') {
@@ -5297,6 +5906,7 @@ h1, h2, h3, h4, h5, h6 {
   window.autoDistributePaymentAmount = autoDistributePaymentAmount;
   window.updatePaymentAllocSummary = updatePaymentAllocSummary;
   window.handlePaymentSubmit = handlePaymentSubmit;
+  window.handlePaymentTypeSwitch = handlePaymentTypeSwitch;
   window.openPaymentCommsModal = openPaymentCommsModal;
 })();
 </script>
@@ -10602,25 +11212,154 @@ window.openNewClientModal = window.openClientModal;
 </script>
   <script>
 (function() {
-    function renderSettings(container) {
+  function renderSettings(container) {
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
+
+    const comp = state.company || {};
+    const tax = getCompanyTaxDetails ? getCompanyTaxDetails() : { gstin: comp.gstin, stateName: comp.state, stateCode: comp.stateCode };
+
     container.innerHTML = `
-      <div class="card">
-        <div class="card-header"><h3 class="card-title"><i class="fas fa-shield-alt" style="color: var(--primary);"></i> Nexallot Enterprise License</h3></div>
-        <div class="card-body">
-          <p><strong>Licensed Client:</strong> ${state.company.name}</p>
-          <p><strong>License Key:</strong> <span style="font-family: monospace; background: var(--bg-primary); padding: 4px 8px; border-radius: 4px;">${state.company.licenseKey}</span></p>
-          <p><strong>Validity:</strong> Active until ${state.company.expiryDate}</p>
-          <p><strong>Authorized Seats:</strong> 5 / ${state.company.maxUsers} Users</p>
+      <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;">
+        
+        <!-- Company Profile & Registered GST State Configuration -->
+        <div class="card">
+          <div class="card-header" style="justify-content: space-between;">
+            <h3 class="card-title"><i class="fas fa-building" style="color: var(--primary); margin-right: 0.5rem;"></i> Company Profile & Tax Registration</h3>
+            <span class="badge badge-info"><i class="fas fa-landmark"></i> State Code: ${tax.stateCode || '--'} (${tax.stateName})</span>
+          </div>
+          <div class="card-body">
+            <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--text-main);">
+              <i class="fas fa-info-circle" style="color: var(--primary); margin-right: 6px;"></i>
+              <strong>Dynamic GST Tax Engine:</strong> Transactions with clients registered in your company's state are treated as <strong>Intra-State (CGST + SGST)</strong>. Sales to clients in any other state automatically calculate <strong>Inter-State (IGST)</strong>.
+            </div>
+
+            <form onsubmit="handleSaveCompanySettings(event)">
+              <div class="form-group">
+                <label class="form-label">Registered Business Legal Name *</label>
+                <input type="text" class="form-control" id="cfg-comp-name" value="${comp.name || ''}" required placeholder="e.g. Apex Global Enterprises">
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                  <label class="form-label">Company GSTIN (15 Digits) *</label>
+                  <input type="text" class="form-control" id="cfg-comp-gstin" value="${comp.gstin || ''}" maxlength="15" style="text-transform: uppercase; font-family: monospace;" placeholder="e.g. 08AAACN1234A1Z5" oninput="handleCompanyGstinInput(this.value)" required>
+                  <small style="font-size: 0.72rem; color: var(--text-muted);">First 2 digits determine your home tax state code</small>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Registered Home State *</label>
+                  <select class="form-control" id="cfg-comp-state" required onchange="handleCompanyStateChange(this.value)">
+                    ${Object.keys(GST_STATE_MAP).map(code => `
+                      <option value="${code}" ${code === tax.stateCode ? 'selected' : ''}>${code} - ${GST_STATE_MAP[code]}</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                  <label class="form-label">Official Business Email</label>
+                  <input type="email" class="form-control" id="cfg-comp-email" value="${comp.email || ''}" placeholder="orders@company.com">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Contact Phone / Support</label>
+                  <input type="text" class="form-control" id="cfg-comp-phone" value="${comp.phone || ''}" placeholder="+91 98765 43210">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Registered Address</label>
+                <textarea class="form-control" id="cfg-comp-address" rows="2" placeholder="Factory / Head Office address...">${comp.address || ''}</textarea>
+              </div>
+
+              <div style="text-align: right; margin-top: 16px;">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Business & Tax Settings</button>
+              </div>
+            </form>
+          </div>
         </div>
+
+        <!-- License & System Status Card -->
+        <div class="card">
+          <div class="card-header"><h3 class="card-title"><i class="fas fa-shield-alt" style="color: var(--primary);"></i> Nexallot Enterprise License</h3></div>
+          <div class="card-body">
+            <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9rem;">
+              <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Licensed Tenant</div>
+                <strong>${comp.name}</strong>
+              </div>
+              <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">License Key</div>
+                <span style="font-family: monospace; background: var(--bg-primary); padding: 4px 8px; border-radius: 4px; font-weight: 700; color: var(--primary);">${comp.licenseKey}</span>
+              </div>
+              <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Validity Period</div>
+                <span class="badge badge-active"><i class="fas fa-check-circle"></i> Active until ${comp.expiryDate}</span>
+              </div>
+              <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Authorized Staff Seats</div>
+                <strong>${(state.users || []).length} / ${comp.maxUsers} Users Authorized</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     `;
   }
 
-  /**
-   * =========================================================================
-   * ORDER DETAILS MODAL (VIEW 20+ ITEMS WITHOUT CLUTTERING FRONT TABLE)
-   * =========================================================================
-   */
+  function handleCompanyGstinInput(gstin) {
+    const clean = (gstin || "").trim().toUpperCase();
+    if (clean.length >= 2 && /^\d{2}/.test(clean)) {
+      const code = clean.substring(0, 2);
+      const stateSelect = document.getElementById("cfg-comp-state");
+      if (stateSelect && GST_STATE_MAP[code]) {
+        stateSelect.value = code;
+      }
+    }
+  }
+  window.handleCompanyGstinInput = handleCompanyGstinInput;
+
+  function handleCompanyStateChange(code) {
+    const curGstin = document.getElementById("cfg-comp-gstin") ? document.getElementById("cfg-comp-gstin").value.trim() : "";
+    if (curGstin.length >= 2) {
+      document.getElementById("cfg-comp-gstin").value = code + curGstin.substring(2);
+    }
+  }
+  window.handleCompanyStateChange = handleCompanyStateChange;
+
+  function handleSaveCompanySettings(e) {
+    e.preventDefault();
+    const name = document.getElementById("cfg-comp-name").value.trim();
+    const gstin = document.getElementById("cfg-comp-gstin").value.trim().toUpperCase();
+    const stateCode = document.getElementById("cfg-comp-state").value;
+    const stateName = GST_STATE_MAP[stateCode] || "Registered State";
+    const email = document.getElementById("cfg-comp-email").value.trim();
+    const phone = document.getElementById("cfg-comp-phone").value.trim();
+    const address = document.getElementById("cfg-comp-address").value.trim();
+
+    state.company.name = name;
+    state.company.gstin = gstin;
+    state.company.state = stateName;
+    state.company.stateCode = stateCode;
+    state.company.email = email;
+    state.company.phone = phone;
+    state.company.address = address;
+
+    localStorage.setItem("nexallot_company_name", name);
+    localStorage.setItem("nexallot_company_gstin", gstin);
+    localStorage.setItem("nexallot_company_state", stateName);
+    localStorage.setItem("nexallot_company_state_code", stateCode);
+    localStorage.setItem("nexallot_company_email", email);
+    localStorage.setItem("nexallot_company_phone", phone);
+    localStorage.setItem("nexallot_company_address", address);
+
+    showToast(`Company profile saved! Home tax state set to ${stateCode} - ${stateName}.`, "success");
+    renderSettings();
+  }
+  window.handleSaveCompanySettings = handleSaveCompanySettings;
 
   window.renderSettings = renderSettings;
 })();
