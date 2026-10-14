@@ -3620,7 +3620,21 @@ h1, h2, h3, h4, h5, h6 {
             };
           });
         }
-        if (Array.isArray(data.expenses)) state.expenses = data.expenses;
+        if (Array.isArray(data.expenses)) {
+          state.expenses = data.expenses.map(e => {
+            let items = [];
+            if (Array.isArray(e.Line_Items)) {
+              items = e.Line_Items;
+            } else if (e.Line_Items_JSON) {
+              try { items = JSON.parse(e.Line_Items_JSON); } catch(err) { items = []; }
+            }
+            return {
+              ...e,
+              Line_Items: Array.isArray(items) ? items : [],
+              Total_Amount: Number(e.Total_Amount || 0)
+            };
+          });
+        }
         if (Array.isArray(data.complaints)) state.complaints = data.complaints;
 
         // Re-render view with fresh database data
@@ -5009,9 +5023,11 @@ h1, h2, h3, h4, h5, h6 {
           ${!v.Check_Out_Time ? `
             <button class="btn btn-danger btn-sm" onclick="openCheckOutModal('${v.Visit_ID}')"><i class="fas fa-sign-out-alt"></i> Check-Out</button>
           ` : `
-            <div style="display: flex; gap: 6px;">
-              <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${v.Client_ID}')" title="Book Order for this Client" style="min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;"><i class="fas fa-shopping-cart"></i></button>
-              <button class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${v.Client_ID}')" title="Collect Payment" style="min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;"><i class="fas fa-wallet"></i></button>
+            <div style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;">
+              <button class="btn btn-secondary btn-sm" onclick="openVisitDetailsModal('${v.Visit_ID}')" title="View Visit Details" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-eye"></i></button>
+              <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${v.Client_ID}')" title="Book Order for this Client" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-shopping-cart"></i></button>
+              <button class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${v.Client_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-wallet"></i></button>
+              <button class="btn btn-secondary btn-sm" onclick="openNewExpenseModal(null, '${v.Visit_ID}')" title="Claim Expense against this visit" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);"><i class="fas fa-receipt"></i></button>
             </div>
           `}
         </td>
@@ -5320,6 +5336,99 @@ h1, h2, h3, h4, h5, h6 {
     }
   }
 
+  function openVisitDetailsModal(visitId) {
+    const v = (state.visits || []).find(x => x.Visit_ID === visitId);
+    if (!v) {
+      showToast("Visit record not found.", "info");
+      return;
+    }
+    const client = getClient(v.Client_ID);
+    const clientName = getClientName(v.Client_ID);
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 580px;">
+          <div class="modal-header">
+            <h3 class="modal-title"><i class="fas fa-map-marker-alt" style="color: var(--primary); margin-right: 0.5rem;"></i> Field Visit: ${v.Visit_ID}</h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div>
+                  <h4 style="margin: 0; font-size: 1.05rem; color: var(--text-main);">${clientName}</h4>
+                  <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+                    ${client ? (client.City_Area || '') + ' • ' + (client.Address_Line || '') : ''}
+                  </div>
+                </div>
+                <span class="badge ${v.Check_Out_Time ? 'badge-active' : 'badge-pending'}">${v.Check_Out_Time ? 'Completed' : 'Active'}</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-color);">
+                <span><i class="fas fa-calendar-alt"></i> ${v.Date}</span>
+                <span><i class="fas fa-user"></i> ${getUserName(v.User_ID)}</span>
+                <span><i class="fas fa-bullseye"></i> <strong>${v.Purpose}</strong></span>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+              <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Check-In Time</div>
+                <div style="font-size: 0.95rem; font-weight: 700; color: var(--success);">${v.Check_In_Time || '-'}</div>
+              </div>
+              <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Check-Out / Duration</div>
+                <div style="font-size: 0.95rem; font-weight: 700; color: var(--primary);">${v.Check_Out_Time ? `${v.Check_Out_Time} (${v.Time_Spent_Mins || 0}m)` : 'In Progress'}</div>
+              </div>
+            </div>
+
+            ${v.Check_In_GPS ? `
+              <div style="margin-bottom: 12px; padding: 10px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">GPS Coordinate Verification</div>
+                  <div style="font-family: monospace; font-size: 0.85rem; font-weight: 600;">${v.Check_In_GPS}</div>
+                </div>
+                ${v.Check_In_GPS.includes(',') ? `
+                  <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.Check_In_GPS)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                    <i class="fas fa-map-marked-alt" style="color: var(--danger);"></i> Open Map
+                  </a>
+                ` : ''}
+              </div>
+            ` : ''}
+
+            <div style="margin-bottom: 12px;">
+              <label class="form-label" style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Visit Notes & Meeting Minutes</label>
+              <div style="padding: 10px; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); font-size: 0.85rem; min-height: 50px;">
+                ${v.Notes || 'No notes logged for this visit.'}
+              </div>
+            </div>
+
+            ${v.Attachment ? `
+              <div style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Site Photo Proof</label>
+                <div>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('VISIT', '${v.Visit_ID}')"><i class="fas fa-paperclip"></i> View Attached Photo</button>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Quick Action: Claim Expense Against this Visit -->
+            <div style="background: rgba(15, 118, 110, 0.08); border: 1px dashed var(--primary); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+              <span style="font-size: 0.8rem; font-weight: 600; color: var(--primary);">Incurred travel or meal expense for this visit?</span>
+              <button type="button" class="btn btn-primary btn-sm" onclick="closeModal(); openNewExpenseModal(null, '${v.Visit_ID}')">
+                <i class="fas fa-receipt"></i> Claim Expense
+              </button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   /**
    * =========================================================================
    * EMAIL & WHATSAPP BUSINESS COMMUNICATION HUB
@@ -5327,12 +5436,12 @@ h1, h2, h3, h4, h5, h6 {
    */
   window.commsData = window.commsData || { phone: "", email: "", subject: "", body: "" };
 
-
   window.renderVisits = renderVisits;
   window.getFilteredVisits = getFilteredVisits;
   window.filterVisitsTable = filterVisitsTable;
   window.renderVisitRows = renderVisitRows;
   window.openNewVisitModal = openNewVisitModal;
+  window.openVisitDetailsModal = openVisitDetailsModal;
   window.handleVisitClientSearch = handleVisitClientSearch;
   window.selectVisitClient = selectVisitClient;
   window.handleVisitSubmit = handleVisitSubmit;
@@ -7408,7 +7517,7 @@ h1, h2, h3, h4, h5, h6 {
 })();
 </script>
   <style>
-.exp-timeline {
+  .exp-timeline {
     display: flex;
     justify-content: space-between;
     position: relative;
@@ -7496,54 +7605,67 @@ h1, h2, h3, h4, h5, h6 {
 </style>
 <script>
 /**
-   * =========================================================================
-   * EXPENSES MODULE STATE & HELPERS
-   * =========================================================================
-   */
-  window.window.currentExpenseLines = window.window.currentExpenseLines || [];
-  window.window.editingClaimId = window.window.editingClaimId !== undefined ? window.window.editingClaimId : null;
+ * =========================================================================
+ * EXPENSES MODULE - ENTERPRISE FIELD FORCE CLAIMS & MULTI-LAYER APPROVALS
+ * =========================================================================
+ */
+(function() {
+  window.currentExpenseLines = window.currentExpenseLines || [];
+  window.editingClaimId = window.editingClaimId !== undefined ? window.editingClaimId : null;
+  window.activeLinkedVisitId = window.activeLinkedVisitId || "";
 
   function getApproverUsers() {
-    return state.users.filter(u => u.Role === "MANAGER" || u.Role === "ADMIN" || u.Role === "ACCOUNTS");
+    return (state.users || []).filter(u => u.Role === "MANAGER" || u.Role === "ADMIN" || u.Role === "ACCOUNTS");
   }
 
   function getAccountsUsers() {
-    const acc = state.users.filter(u => u.Role === "ACCOUNTS");
-    return acc.length > 0 ? acc : state.users.filter(u => u.Role === "ADMIN");
+    const acc = (state.users || []).filter(u => u.Role === "ACCOUNTS");
+    return acc.length > 0 ? acc : (state.users || []).filter(u => u.Role === "ADMIN");
   }
 
   /**
    * 1. RENDER EXPENSES VIEW
    */
   function renderExpenses(container) {
-    const filterQuery = (state.filters.expenses || "").toLowerCase();
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
 
-    const filteredExpenses = state.expenses.filter(e => {
+    const rawExpenses = state.expenses || [];
+    const expensesList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawExpenses, "User_ID") : rawExpenses;
+    const filterQuery = (state.filters.expenses || "").toLowerCase().trim();
+
+    const filteredExpenses = expensesList.filter(e => {
       const uName = getUserName(e.User_ID).toLowerCase();
       const claimId = (e.Claim_ID || "").toLowerCase();
       const title = (e.Title || "").toLowerCase();
       const status = (e.Overall_Approval_Status || e.Manager_Status || "").toLowerCase();
-      return uName.includes(filterQuery) || claimId.includes(filterQuery) || title.includes(filterQuery) || status.includes(filterQuery);
+      const clientName = (getClientName(e.Client_ID) || "").toLowerCase();
+      const visitId = (e.Linked_Visit_ID || "").toLowerCase();
+      return uName.includes(filterQuery) || claimId.includes(filterQuery) || title.includes(filterQuery) || status.includes(filterQuery) || clientName.includes(filterQuery) || visitId.includes(filterQuery);
     });
 
     // Metrics
-    const totalClaimed = state.expenses.reduce((s, e) => s + Number(e.Total_Amount || 0), 0);
-    const pendingManagerApprovals = state.expenses.filter(e => {
+    const totalClaimed = expensesList.reduce((s, e) => s + Number(e.Total_Amount || 0), 0);
+    const pendingManagerApprovals = expensesList.filter(e => {
       const st = e.Overall_Approval_Status || e.Manager_Status;
       return st === "PENDING_L1" || st === "PENDING_L2" || st === "PENDING_L3" || st === "PENDING";
     }).length;
-    const pendingAccountsSettlement = state.expenses.filter(e => {
+    const pendingAccountsSettlement = expensesList.filter(e => {
       const st = e.Overall_Approval_Status || e.Manager_Status;
       return (st === "APPROVED") && e.Accounts_Status !== "SETTLED";
     }).length;
-    const totalSettled = state.expenses.filter(e => e.Accounts_Status === "SETTLED").reduce((s, e) => s + Number(e.Total_Amount || 0), 0);
+    const totalSettled = expensesList.filter(e => e.Accounts_Status === "SETTLED").reduce((s, e) => s + Number(e.Total_Amount || 0), 0);
 
     container.innerHTML = `
       <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 10px;">
-        <button class="btn btn-primary" onclick="openNewExpenseModal()"><i class="fas fa-plus"></i> Submit New Claim</button>
+        <button class="btn btn-secondary" onclick="exportExpensesToCsv()" style="display: inline-flex; align-items: center; gap: 6px;">
+          <i class="fas fa-file-excel" style="color: var(--success);"></i> Export CSV
+        </button>
+        <button class="btn btn-primary" onclick="openNewExpenseModal()" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+          <i class="fas fa-plus"></i> Submit New Claim
+        </button>
       </div>
 
-      
       <div class="dashboard-grid" style="margin-bottom: 1.25rem;">
         <div class="stats-card card-teal">
           <div class="stats-info">
@@ -7561,7 +7683,7 @@ h1, h2, h3, h4, h5, h6 {
         </div>
         <div class="stats-card card-sky">
           <div class="stats-info">
-            <span class="stats-label">Ready for Accounts Payout</span>
+            <span class="stats-label">Ready for Payout</span>
             <span class="stats-value">${pendingAccountsSettlement}</span>
           </div>
           <div class="stats-icon-wrapper"><i class="fas fa-file-invoice-dollar"></i></div>
@@ -7575,21 +7697,21 @@ h1, h2, h3, h4, h5, h6 {
         </div>
       </div>
 
-      
       <div class="tab-filter-bar">
-        <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 380px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 420px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" id="expenses-search-input" class="form-control" placeholder="Search Claim ID, Employee, Category, Status..." value="${state.filters.expenses || ''}" oninput="filterExpensesTable(this.value)">
+          <input type="text" id="expenses-search-input" class="form-control" placeholder="Search Claim ID, Employee, Visit ID, Category..." value="${state.filters.expenses || ''}" oninput="filterExpensesTable(this.value)">
         </div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong id="expenses-count-showing">${filteredExpenses.length}</strong> of ${state.expenses.length} claims</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">
+          Showing <strong id="expenses-count-showing">${filteredExpenses.length}</strong> of ${expensesList.length} claims
+        </div>
       </div>
 
-      
       <div class="table-wrapper">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Claim ID & Title</th>
+              <th>Claim ID & Details</th>
               <th>Date</th>
               <th>Employee</th>
               <th>Line Items</th>
@@ -7597,7 +7719,7 @@ h1, h2, h3, h4, h5, h6 {
               <th>Approval Stage</th>
               <th>Accounts Payout</th>
               <th>Bill Proof</th>
-              <th>Actions</th>
+              <th style="min-width: 140px;">Actions</th>
             </tr>
           </thead>
           <tbody id="expenses-table-tbody">
@@ -7610,36 +7732,44 @@ h1, h2, h3, h4, h5, h6 {
 
   function filterExpensesTable(query) {
     state.filters.expenses = query;
-    const filterQuery = (query || "").toLowerCase();
-    const filteredExpenses = state.expenses.filter(e => {
+    const filterQuery = (query || "").toLowerCase().trim();
+    const rawExpenses = state.expenses || [];
+    const expensesList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawExpenses, "User_ID") : rawExpenses;
+
+    const filteredExpenses = expensesList.filter(e => {
       const uName = getUserName(e.User_ID).toLowerCase();
       const claimId = (e.Claim_ID || "").toLowerCase();
       const title = (e.Title || "").toLowerCase();
       const status = (e.Overall_Approval_Status || e.Manager_Status || "").toLowerCase();
-      return uName.includes(filterQuery) || claimId.includes(filterQuery) || title.includes(filterQuery) || status.includes(filterQuery);
+      const clientName = (getClientName(e.Client_ID) || "").toLowerCase();
+      const visitId = (e.Linked_Visit_ID || "").toLowerCase();
+      return uName.includes(filterQuery) || claimId.includes(filterQuery) || title.includes(filterQuery) || status.includes(filterQuery) || clientName.includes(filterQuery) || visitId.includes(filterQuery);
     });
 
     const tbody = document.getElementById('expenses-table-tbody');
     const counter = document.getElementById('expenses-count-showing');
-    if (tbody) {
-      tbody.innerHTML = renderExpenseRows(filteredExpenses);
-    }
-    if (counter) {
-      counter.textContent = filteredExpenses.length;
-    }
+    if (tbody) tbody.innerHTML = renderExpenseRows(filteredExpenses);
+    if (counter) counter.textContent = filteredExpenses.length;
   }
 
   function renderExpenseRows(filteredExpenses) {
-    const role = state.currentUser.Role;
+    const role = state.currentUser ? (state.currentUser.Role || "ADMIN") : "ADMIN";
+    const currentUserId = state.currentUser ? state.currentUser.User_ID : "USR-100";
     const isManager = role === "MANAGER" || role === "ADMIN";
     const isAccounts = role === "ACCOUNTS" || role === "ADMIN";
 
-    if (filteredExpenses.length === 0) {
-      return `<tr><td colspan="9" style="text-align:center; padding: 24px; color:var(--text-muted);">No expense claims found matching your search.</td></tr>`;
+    if (!filteredExpenses || filteredExpenses.length === 0) {
+      return `<tr><td colspan="9" style="text-align:center; padding: 28px; color:var(--text-muted); font-size: 0.9rem;">No expense claims found matching your criteria.</td></tr>`;
     }
 
     return filteredExpenses.map(e => {
-      const lines = e.Line_Items || [];
+      // Ensure Line_Items is normalized
+      let lines = e.Line_Items || [];
+      if (!Array.isArray(lines) && e.Line_Items_JSON) {
+        try { lines = JSON.parse(e.Line_Items_JSON); } catch(err) { lines = []; }
+      }
+      if (!Array.isArray(lines)) lines = [];
+
       const status = e.Overall_Approval_Status || e.Manager_Status || "PENDING";
       const isL1Pending = status === "PENDING_L1" || status === "PENDING";
       const isL2Pending = status === "PENDING_L2";
@@ -7648,13 +7778,13 @@ h1, h2, h3, h4, h5, h6 {
       const isClarity = status === "CLARITY_NEEDED";
       const isRejected = status === "REJECTED";
 
-      // Edit is strictly allowed ONLY until 1st approver approves (i.e. PENDING_L1 or CLARITY_NEEDED)
-      const canEdit = (isL1Pending || isClarity) && (e.User_ID === state.currentUser.User_ID || state.currentUser.Role === "ADMIN");
+      // Edit is allowed ONLY until 1st approver approves
+      const canEdit = (isL1Pending || isClarity) && (e.User_ID === currentUserId || role === "ADMIN");
 
       // Role approval permissions
-      const canApproveL1 = (isManager && isL1Pending && (e.Approver_1_ID === state.currentUser.User_ID || state.currentUser.Role === "ADMIN"));
-      const canApproveL2 = (isManager && isL2Pending && (e.Approver_2_ID === state.currentUser.User_ID || state.currentUser.Role === "ADMIN"));
-      const canApproveL3 = (isManager && isL3Pending && (e.Approver_3_ID === state.currentUser.User_ID || state.currentUser.Role === "ADMIN"));
+      const canApproveL1 = (isManager && isL1Pending && (e.Approver_1_ID === currentUserId || role === "ADMIN"));
+      const canApproveL2 = (isManager && isL2Pending && (e.Approver_2_ID === currentUserId || role === "ADMIN"));
+      const canApproveL3 = (isManager && isL3Pending && (e.Approver_3_ID === currentUserId || role === "ADMIN"));
       const canSettleAccounts = (isAccounts && isApproved && e.Accounts_Status !== "SETTLED");
       const canFollowUp = (isL1Pending || isL2Pending || isL3Pending || (isApproved && e.Accounts_Status !== "SETTLED"));
 
@@ -7677,19 +7807,32 @@ h1, h2, h3, h4, h5, h6 {
         <tr>
           <td>
             <strong>${e.Claim_ID}</strong><br>
-            <small style="color: var(--text-muted);">${e.Title || 'Field Travel Claim'}</small>
+            <span style="font-size: 0.8rem; color: var(--text-main);">${e.Title || 'Field Travel Claim'}</span>
+            <!-- Site Visit Linkage Indicator -->
+            <div style="margin-top: 3px;">
+              ${e.Linked_Visit_ID ? `
+                <span class="badge badge-info" style="font-size: 0.7rem; padding: 2px 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onclick="typeof openVisitDetailsModal === 'function' ? openVisitDetailsModal('${e.Linked_Visit_ID}') : showToast('Linked Visit: ${e.Linked_Visit_ID}', 'info')" title="Click to view linked site visit">
+                  <i class="fas fa-map-marker-alt"></i> ${e.Linked_Visit_ID}
+                </span>
+                ${e.Client_ID ? `<span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600; margin-left: 4px;">• ${getClientName(e.Client_ID)}</span>` : ''}
+              ` : `
+                <span class="badge badge-secondary" style="font-size: 0.68rem; opacity: 0.85; padding: 1px 6px;">
+                  <i class="fas fa-bolt"></i> Direct Claim
+                </span>
+              `}
+            </div>
           </td>
           <td>${e.Date}</td>
           <td>
             <strong>${getUserName(e.User_ID)}</strong>
-            <div style="font-size: 0.725rem; color: var(--text-muted);">${e.User_ID === state.currentUser.User_ID ? '<span style="color:var(--primary); font-weight:600;">(You)</span>' : ''}</div>
+            <div style="font-size: 0.725rem; color: var(--text-muted);">${e.User_ID === currentUserId ? '<span style="color:var(--primary); font-weight:600;">(You)</span>' : ''}</div>
           </td>
           <td>
             <span class="badge badge-on-hold" style="cursor: pointer;" onclick="openExpenseDetailsModal('${e.Claim_ID}')" title="Click to view line items">
               <i class="fas fa-list-ol"></i> ${lines.length} ${lines.length === 1 ? 'Item' : 'Items'}
             </span>
           </td>
-          <td><strong style="color: var(--primary); font-size: 0.95rem;">₹${Number(e.Total_Amount).toLocaleString()}</strong></td>
+          <td><strong style="color: var(--primary); font-size: 0.95rem;">₹${Number(e.Total_Amount || 0).toLocaleString()}</strong></td>
           <td>
             ${approvalBadgeHtml}
             ${e.Approver_1_Remarks ? `<div style="font-size:0.725rem; color:var(--text-muted); margin-top:2px;">L1: "${e.Approver_1_Remarks}"</div>` : ''}
@@ -7703,34 +7846,58 @@ h1, h2, h3, h4, h5, h6 {
             ${e.Accounts_UTR_Ref ? `<div style="font-size:0.725rem; color:var(--text-muted); margin-top:2px;">Ref: ${e.Accounts_UTR_Ref}</div>` : ''}
           </td>
           <td>
-            ${e.Attachment ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('EXPENSE', '${e.Claim_ID}')" style="font-size:0.75rem;"><i class="fas fa-paperclip"></i> View</button>` : '<span style="color:var(--text-muted); font-size:0.75rem;">None</span>'}
+            ${e.Attachment ? `
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('EXPENSE', '${e.Claim_ID}')" title="View Uploaded Receipt" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                <i class="fas fa-paperclip"></i>
+              </button>
+            ` : '<span style="color:var(--text-muted); font-size:0.75rem;">None</span>'}
           </td>
-          <td>
-            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-              <button class="btn btn-secondary btn-sm" onclick="openExpenseDetailsModal('${e.Claim_ID}')" title="View Full Breakdown & Timeline"><i class="fas fa-eye"></i></button>
+          <td style="white-space: nowrap;">
+            <!-- Perfectly Aligned, Uniform 32x32px Action Buttons -->
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <!-- 1. View Breakdown & Audit Timeline -->
+              <button class="btn btn-secondary btn-sm" onclick="openExpenseDetailsModal('${e.Claim_ID}')" title="View Full Breakdown & Audit Timeline" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                <i class="fas fa-eye"></i>
+              </button>
 
+              <!-- 2. Edit Claim (if allowed) -->
               ${canEdit ? `
-                <button class="btn btn-warning btn-sm" onclick="openNewExpenseModal('${e.Claim_ID}')" title="Edit Claim (Editable until 1st Approval)"><i class="fas fa-edit"></i> Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="openNewExpenseModal('${e.Claim_ID}')" title="Edit Claim (Editable until 1st Approval)" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--warning);">
+                  <i class="fas fa-edit"></i>
+                </button>
               ` : ''}
 
+              <!-- 3. Remind Approver / Accounts -->
               ${canFollowUp ? `
-                <button class="btn btn-secondary btn-sm" style="color: var(--primary); font-weight: 600;" onclick="sendExpenseFollowUp('${e.Claim_ID}')" title="Send Follow-up Reminder"><i class="fas fa-bell"></i> Remind</button>
+                <button class="btn btn-secondary btn-sm" onclick="sendExpenseFollowUp('${e.Claim_ID}')" title="Send WhatsApp / Email Approval Reminder" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);">
+                  <i class="fas fa-bell"></i>
+                </button>
               ` : ''}
               
+              <!-- 4. Sign Approvals (L1 / L2 / L3) -->
               ${canApproveL1 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 1)" title="1st Level Approval"><i class="fas fa-check"></i> Sign L1</button>
+                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 1)" title="Sign Level 1 Manager Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-check"></i>
+                </button>
               ` : ''}
 
               ${canApproveL2 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 2)" title="2nd Level Approval"><i class="fas fa-check-double"></i> Sign L2</button>
+                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 2)" title="Sign Level 2 Senior Manager Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: #0284c7; border-color: #0284c7;">
+                  <i class="fas fa-check-double"></i>
+                </button>
               ` : ''}
 
               ${canApproveL3 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 3)" title="3rd Level Approval"><i class="fas fa-check-circle"></i> Sign L3</button>
+                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 3)" title="Sign Level 3 Director Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: #8b5cf6; border-color: #8b5cf6;">
+                  <i class="fas fa-check-circle"></i>
+                </button>
               ` : ''}
 
+              <!-- 5. Accounts Settlement / Payout -->
               ${canSettleAccounts ? `
-                <button class="btn btn-primary btn-sm" onclick="openExpenseSettlementModal('${e.Claim_ID}')" title="Settle and disburse payout"><i class="fas fa-hand-holding-usd"></i> Settle</button>
+                <button class="btn btn-primary btn-sm" onclick="openExpenseSettlementModal('${e.Claim_ID}')" title="Disburse Payout & Record Bank UTR" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                  <i class="fas fa-hand-holding-usd"></i>
+                </button>
               ` : ''}
             </div>
           </td>
@@ -7740,51 +7907,78 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   /**
-   * 2. SUBMIT / EDIT MULTI-LINE EXPENSE CLAIM MODAL (WITH 1, 2, OR 3 APPROVAL LAYERS)
+   * 2. SUBMIT / EDIT MULTI-LINE EXPENSE CLAIM MODAL (WITH SITE VISIT LINKAGE)
    */
-  function openNewExpenseModal(editClaimId = null) {
+  function openNewExpenseModal(editClaimId = null, preLinkedVisitId = null) {
     window.editingClaimId = editClaimId;
     const today = new Date().toISOString().split('T')[0];
     const approvers = getApproverUsers();
 
     let existingClaim = null;
     let initialLayers = 1;
-    let defaultApprover1 = state.currentUser.Manager_ID || (approvers[0] ? approvers[0].User_ID : "");
+    let defaultApprover1 = state.currentUser ? (state.currentUser.Manager_ID || (approvers[0] ? approvers[0].User_ID : "")) : (approvers[0] ? approvers[0].User_ID : "");
     let defaultApprover2 = (approvers[1] ? approvers[1].User_ID : (approvers[0] ? approvers[0].User_ID : ""));
     let defaultApprover3 = (approvers[2] ? approvers[2].User_ID : (approvers[0] ? approvers[0].User_ID : ""));
     let claimTitle = "";
     let claimDate = today;
     let claimAttachment = "";
+    let linkedVisitId = preLinkedVisitId || "";
+    let linkedClientId = "";
 
     if (editClaimId) {
-      existingClaim = state.expenses.find(e => e.Claim_ID === editClaimId);
+      existingClaim = (state.expenses || []).find(e => e.Claim_ID === editClaimId);
       if (existingClaim) {
         claimTitle = existingClaim.Title || "";
         claimDate = existingClaim.Date || today;
         claimAttachment = existingClaim.Attachment || "";
+        linkedVisitId = existingClaim.Linked_Visit_ID || "";
+        linkedClientId = existingClaim.Client_ID || "";
         defaultApprover1 = existingClaim.Approver_1_ID || defaultApprover1;
         defaultApprover2 = existingClaim.Approver_2_ID || defaultApprover2;
         defaultApprover3 = existingClaim.Approver_3_ID || defaultApprover3;
         initialLayers = existingClaim.Layers_Count || (existingClaim.Approver_3_ID ? 3 : (existingClaim.Requires_L2 ? 2 : 1));
         
-        window.currentExpenseLines = (existingClaim.Line_Items || []).map((it, idx) => ({
+        let existingLines = existingClaim.Line_Items || [];
+        if (!Array.isArray(existingLines) && existingClaim.Line_Items_JSON) {
+          try { existingLines = JSON.parse(existingClaim.Line_Items_JSON); } catch(err) { existingLines = []; }
+        }
+        window.currentExpenseLines = existingLines.map((it, idx) => ({
           id: idx + 1,
           date: it.date || claimDate,
-          category: it.category,
-          desc: it.desc,
-          amount: it.amount
+          category: it.category || "Petrol / Travel Allowance",
+          desc: it.desc || "",
+          amount: it.amount || 0
         }));
       }
     }
 
+    // Auto-setup for preLinkedVisitId if launching directly from visits tab
+    if (preLinkedVisitId && !editClaimId) {
+      const v = (state.visits || []).find(x => x.Visit_ID === preLinkedVisitId);
+      if (v) {
+        linkedVisitId = v.Visit_ID;
+        linkedClientId = v.Client_ID;
+        claimDate = v.Date || today;
+        claimTitle = `Site Visit Expenses - ${getClientName(v.Client_ID)} (${v.Purpose || 'Client Meeting'})`;
+      }
+    }
+
+    window.activeLinkedVisitId = linkedVisitId;
+
     if (!editClaimId || window.currentExpenseLines.length === 0) {
-      // Default 1st line item
       window.currentExpenseLines = [
-        { id: 1, date: today, category: state.masters.expenseCategories[0] || "Petrol / Travel Allowance", desc: "", amount: "" }
+        { id: 1, date: claimDate, category: (state.masters.expenseCategories || [])[0] || "Petrol / Travel Allowance", desc: "", amount: "" }
       ];
     }
 
+    // List visits available to link
+    const visitsList = state.visits || [];
+    const availableVisits = (typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(visitsList, "User_ID") : visitsList)
+      .slice(0, 30); // Show recent 30 visits
+
     const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
     modal.innerHTML = `
       <div class="modal-overlay show" id="active-modal">
         <div class="modal-container modal-lg">
@@ -7795,7 +7989,52 @@ h1, h2, h3, h4, h5, h6 {
           <form onsubmit="handleExpenseSubmit(event)">
             <div class="modal-body">
               
-              
+              <!-- SITE VISIT LINKAGE SEGMENTED CONTROLLER (User Requirement 1) -->
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                  <label class="form-label" style="font-weight: 700; color: var(--text-main); margin: 0; font-size: 0.85rem;">
+                    <i class="fas fa-link" style="color: var(--primary);"></i> Expense Nature / Site Visit Linkage *
+                  </label>
+                  <span id="exp-linkage-status-badge" class="badge ${linkedVisitId ? 'badge-info' : 'badge-secondary'}" style="font-size: 0.72rem;">
+                    <i class="fas ${linkedVisitId ? 'fa-map-marker-alt' : 'fa-bolt'}"></i> ${linkedVisitId ? 'Linked to Site Visit: ' + linkedVisitId : 'Direct General Claim'}
+                  </span>
+                </div>
+
+                <div style="display: flex; gap: 16px; margin-bottom: 10px; flex-wrap: wrap;">
+                  <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+                    <input type="radio" name="exp_claim_nature" id="exp-nature-direct" value="DIRECT" ${!linkedVisitId ? 'checked' : ''} onchange="toggleExpenseVisitLinkage(false)">
+                    <span>Direct General Claim (Office / Local Misc)</span>
+                  </label>
+                  <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+                    <input type="radio" name="exp_claim_nature" id="exp-nature-visit" value="VISIT" ${linkedVisitId ? 'checked' : ''} onchange="toggleExpenseVisitLinkage(true)">
+                    <span>Against Site / Field Visit</span>
+                  </label>
+                </div>
+
+                <!-- Visit Selector Dropdown -->
+                <div id="exp-visit-select-wrap" style="${linkedVisitId ? 'display: block;' : 'display: none;'}">
+                  <label class="form-label" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+                    Select Associated Field Visit *
+                  </label>
+                  <select class="form-control form-control-sm" id="exp-linked-visit-id" onchange="handleExpenseVisitSelected(this.value)">
+                    <option value="">-- Choose Field Visit from Log --</option>
+                    ${availableVisits.map(v => `
+                      <option value="${v.Visit_ID}" data-client="${v.Client_ID}" data-date="${v.Date}" data-purpose="${v.Purpose}" ${v.Visit_ID === linkedVisitId ? 'selected' : ''}>
+                        ${v.Visit_ID} • ${getClientName(v.Client_ID)} (${v.Date}) • Purpose: ${v.Purpose}
+                      </option>
+                    `).join('')}
+                  </select>
+
+                  <div id="exp-visit-context-box" style="margin-top: 8px; padding: 8px 12px; border-radius: 6px; background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); font-size: 0.775rem; color: var(--text-main); ${linkedVisitId ? 'display: flex;' : 'display: none;'} align-items: center; justify-content: space-between;">
+                    <span id="exp-visit-context-text">
+                      ${linkedVisitId ? `<i class="fas fa-check-circle" style="color:var(--success);"></i> Linked Visit: <strong>${linkedVisitId}</strong> • Client: <strong>${getClientName(linkedClientId)}</strong>` : ''}
+                    </span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearExpenseVisitLinkage()" style="padding: 1px 6px; font-size: 0.7rem;">Unlink</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- General Claim Details -->
               <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
                 <div class="form-group">
                   <label class="form-label">Claim Title / Purpose *</label>
@@ -7807,11 +8046,12 @@ h1, h2, h3, h4, h5, h6 {
                 </div>
               </div>
 
-              
+              <!-- Approval Hierarchy & Workflow Layers -->
               <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-                  <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);"><i class="fas fa-users-cog" style="color: var(--primary);"></i> Approval Hierarchy & Workflow Layers</div>
-                  
+                  <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);">
+                    <i class="fas fa-users-cog" style="color: var(--primary);"></i> Approval Hierarchy & Workflow Layers
+                  </div>
                   
                   <div style="display: flex; align-items: center; gap: 6px;">
                     <label style="font-size: 0.775rem; font-weight: 600; margin: 0; color: var(--text-muted);">Required Approval Layers:</label>
@@ -7824,63 +8064,75 @@ h1, h2, h3, h4, h5, h6 {
                 </div>
                 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;" id="exp-approvers-grid">
-                  
                   <div class="form-group" style="margin: 0;" id="wrap-approver-1">
                     <label class="form-label" style="font-size: 0.75rem; font-weight: 600;">1st Approver (Direct Manager) *</label>
                     <select class="form-control form-control-sm" id="exp-approver-1" required>
-                      ${approvers.map(u => `
-                        <option value="${u.User_ID}" ${u.User_ID === defaultApprover1 ? 'selected' : ''}>
-                          ${u.Full_Name} (${u.Role} - ${u.Designation})
-                        </option>
-                      `).join('')}
+                      ${approvers.map(u => {
+                        const subInfo = u.Designation || u.Department || u.Branch_Area || "";
+                        return `
+                          <option value="${u.User_ID}" ${u.User_ID === defaultApprover1 ? 'selected' : ''}>
+                            ${u.Full_Name} (${u.Role}${subInfo && subInfo !== u.Role ? ' - ' + subInfo : ''})
+                          </option>
+                        `;
+                      }).join('')}
                     </select>
                   </div>
 
-                  
                   <div class="form-group" style="margin: 0; ${initialLayers >= 2 ? '' : 'display: none;'}" id="wrap-approver-2">
                     <label class="form-label" style="font-size: 0.75rem; font-weight: 600;">2nd Approver (Senior Manager / Admin) *</label>
                     <select class="form-control form-control-sm" id="exp-approver-2">
-                      ${approvers.map(u => `
-                        <option value="${u.User_ID}" ${u.User_ID === defaultApprover2 ? 'selected' : ''}>
-                          ${u.Full_Name} (${u.Role} - ${u.Designation})
-                        </option>
-                      `).join('')}
+                      ${approvers.map(u => {
+                        const subInfo = u.Designation || u.Department || u.Branch_Area || "";
+                        return `
+                          <option value="${u.User_ID}" ${u.User_ID === defaultApprover2 ? 'selected' : ''}>
+                            ${u.Full_Name} (${u.Role}${subInfo && subInfo !== u.Role ? ' - ' + subInfo : ''})
+                          </option>
+                        `;
+                      }).join('')}
                     </select>
                   </div>
 
-                  
                   <div class="form-group" style="margin: 0; ${initialLayers >= 3 ? '' : 'display: none;'}" id="wrap-approver-3">
                     <label class="form-label" style="font-size: 0.75rem; font-weight: 600;">3rd Approver (Director / Operations Head) *</label>
                     <select class="form-control form-control-sm" id="exp-approver-3">
-                      ${approvers.map(u => `
-                        <option value="${u.User_ID}" ${u.User_ID === defaultApprover3 ? 'selected' : ''}>
-                          ${u.Full_Name} (${u.Role} - ${u.Designation})
-                        </option>
-                      `).join('')}
+                      ${approvers.map(u => {
+                        const subInfo = u.Designation || u.Department || u.Branch_Area || "";
+                        return `
+                          <option value="${u.User_ID}" ${u.User_ID === defaultApprover3 ? 'selected' : ''}>
+                            ${u.Full_Name} (${u.Role}${subInfo && subInfo !== u.Role ? ' - ' + subInfo : ''})
+                          </option>
+                        `;
+                      }).join('')}
                     </select>
                   </div>
                 </div>
 
                 <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 6px;">
-                  <i class="fas fa-info-circle"></i> After all selected approval layers sign off, the claim will automatically be queued for the <strong>Accounts Team</strong> for final payout settlement.
+                  <i class="fas fa-info-circle"></i> Once all selected approval layers sign off, the claim is queued for final <strong>Accounts Settlement</strong>.
                 </div>
               </div>
 
-              
+              <!-- Multi-Item Expense Line Items -->
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <label class="form-label" style="margin: 0; font-weight: 700;"><i class="fas fa-list" style="color: var(--primary);"></i> Expense Line Items *</label>
+                <div>
+                  <label class="form-label" style="margin: 0; font-weight: 700;"><i class="fas fa-list" style="color: var(--primary);"></i> Expense Line Items *</label>
+                  <span style="font-size: 0.725rem; color: var(--text-muted); margin-left: 4px;">Itemized receipts & travel details</span>
+                </div>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="addExpenseLineItem()"><i class="fas fa-plus"></i> Add Item</button>
               </div>
 
               <div id="exp-lines-container"></div>
 
-              
+              <!-- Total Claim Bar -->
               <div style="background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 8px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 0.85rem; color: #94a3b8;">Total Claim Amount:</span>
-                <span style="font-size: 1.2rem; font-weight: 800; color: #38bdf8;" id="exp-grand-total">₹0</span>
+                <div>
+                  <span style="font-size: 0.85rem; color: #94a3b8;">Total Claim Amount:</span>
+                  <div style="font-size: 0.72rem; color: #64748b;" id="exp-total-items-count">1 Item</div>
+                </div>
+                <span style="font-size: 1.25rem; font-weight: 800; color: #38bdf8;" id="exp-grand-total">₹0</span>
               </div>
 
-              
+              <!-- Attachment Box -->
               <div class="form-group" style="margin-top: 12px;">
                 <label class="form-label"><i class="fas fa-camera"></i> Combined Bills / Receipt Photos Attachment</label>
                 <div class="attachment-preview-box" onclick="document.getElementById('exp-file-input').click()">
@@ -7904,6 +8156,74 @@ h1, h2, h3, h4, h5, h6 {
     renderExpenseModalLines();
   }
 
+  // Toggle Site Visit Linkage
+  window.toggleExpenseVisitLinkage = function(isVisit) {
+    const wrap = document.getElementById("exp-visit-select-wrap");
+    const badge = document.getElementById("exp-linkage-status-badge");
+    if (wrap) wrap.style.display = isVisit ? "block" : "none";
+    if (badge) {
+      if (isVisit) {
+        badge.className = "badge badge-info";
+        badge.innerHTML = `<i class="fas fa-map-marker-alt"></i> Against Site Visit`;
+      } else {
+        badge.className = "badge badge-secondary";
+        badge.innerHTML = `<i class="fas fa-bolt"></i> Direct General Claim`;
+        clearExpenseVisitLinkage();
+      }
+    }
+  };
+
+  window.handleExpenseVisitSelected = function(visitId) {
+    window.activeLinkedVisitId = visitId;
+    const v = (state.visits || []).find(x => x.Visit_ID === visitId);
+    if (!v) return;
+
+    const clientName = getClientName(v.Client_ID);
+    const contextBox = document.getElementById("exp-visit-context-box");
+    const contextText = document.getElementById("exp-visit-context-text");
+    const titleInput = document.getElementById("exp-title");
+    const dateInput = document.getElementById("exp-date");
+    const badge = document.getElementById("exp-linkage-status-badge");
+
+    if (contextBox) contextBox.style.display = "flex";
+    if (contextText) {
+      contextText.innerHTML = `<i class="fas fa-check-circle" style="color:var(--success);"></i> Linked to Visit: <strong>${v.Visit_ID}</strong> • Client: <strong>${clientName}</strong> (${v.Purpose})`;
+    }
+    if (badge) {
+      badge.className = "badge badge-info";
+      badge.innerHTML = `<i class="fas fa-map-marker-alt"></i> Linked: ${v.Visit_ID}`;
+    }
+
+    // Auto-populate Title if empty or default
+    if (titleInput && (!titleInput.value || titleInput.value.includes("Field Travel") || titleInput.value.includes("Site Visit"))) {
+      titleInput.value = `Site Visit Expenses - ${clientName} (${v.Purpose})`;
+    }
+    if (dateInput && v.Date) {
+      dateInput.value = v.Date;
+    }
+
+    // Auto-populate line 1 description if empty
+    if (window.currentExpenseLines && window.currentExpenseLines[0] && !window.currentExpenseLines[0].desc) {
+      window.currentExpenseLines[0].desc = `Travel / meeting expenses for visit to ${clientName} (${v.Purpose})`;
+      renderExpenseModalLines();
+    }
+  };
+
+  window.clearExpenseVisitLinkage = function() {
+    window.activeLinkedVisitId = "";
+    const select = document.getElementById("exp-linked-visit-id");
+    const contextBox = document.getElementById("exp-visit-context-box");
+    const badge = document.getElementById("exp-linkage-status-badge");
+    const radioDirect = document.getElementById("exp-nature-direct");
+    if (select) select.value = "";
+    if (contextBox) contextBox.style.display = "none";
+    if (badge) {
+      badge.className = "badge badge-secondary";
+      badge.innerHTML = `<i class="fas fa-bolt"></i> Direct General Claim`;
+    }
+    if (radioDirect) radioDirect.checked = true;
+  };
+
   function handleExpenseLayersCountChange(val) {
     const count = Number(val) || 1;
     const wrap2 = document.getElementById("wrap-approver-2");
@@ -7916,56 +8236,79 @@ h1, h2, h3, h4, h5, h6 {
     const container = document.getElementById("exp-lines-container");
     if (!container) return;
 
-    container.innerHTML = window.currentExpenseLines.map((line, idx) => `
-      <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;">
-        <div style="display: grid; grid-template-columns: 1.1fr 1.6fr 1.8fr 1fr auto; gap: 8px; align-items: center;">
-          
-          <div>
-            <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Date</label>
-            <input type="date" class="form-control form-control-sm" value="${line.date}" onchange="window.currentExpenseLines[${idx}].date = this.value" required>
-          </div>
+    container.innerHTML = window.currentExpenseLines.map((line, idx) => {
+      const isPetrol = (line.category || '').toLowerCase().includes('petrol') || (line.category || '').toLowerCase().includes('travel') || (line.category || '').toLowerCase().includes('conveyance');
+      return `
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;">
+          <div style="display: grid; grid-template-columns: 1.1fr 1.6fr 1.8fr 1fr auto; gap: 8px; align-items: center;">
+            <div>
+              <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Date</label>
+              <input type="date" class="form-control form-control-sm" value="${line.date}" onchange="window.currentExpenseLines[${idx}].date = this.value" required>
+            </div>
 
-          
-          <div>
-            <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Category *</label>
-            <select class="form-control form-control-sm" onchange="window.currentExpenseLines[${idx}].category = this.value" required>
-              ${state.masters.expenseCategories.map(c => `
-                <option value="${c}" ${c === line.category ? 'selected' : ''}>${c}</option>
-              `).join('')}
-            </select>
-          </div>
+            <div>
+              <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Category *</label>
+              <select class="form-control form-control-sm" onchange="window.currentExpenseLines[${idx}].category = this.value; renderExpenseModalLines()" required>
+                ${(state.masters.expenseCategories || []).map(c => `
+                  <option value="${c}" ${c === line.category ? 'selected' : ''}>${c}</option>
+                `).join('')}
+              </select>
+            </div>
 
-          
-          <div>
-            <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Description / Km</label>
-            <input type="text" class="form-control form-control-sm" placeholder="e.g. 35km visit / Client Lunch" value="${line.desc || ''}" oninput="window.currentExpenseLines[${idx}].desc = this.value">
-          </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label class="form-label" style="font-size: 0.725rem; font-weight: 600; margin-bottom: 2px;">Description / KM</label>
+                ${isPetrol ? `
+                  <a href="javascript:void(0)" onclick="openMileageCalcModal(${idx})" style="font-size: 0.68rem; color: var(--primary); text-decoration: none; font-weight: 700;">
+                    <i class="fas fa-calculator"></i> KM Calc
+                  </a>
+                ` : ''}
+              </div>
+              <input type="text" class="form-control form-control-sm" placeholder="${isPetrol ? 'e.g. 45 KM client roundtrip' : 'e.g. Courier charges / Lunch'}" value="${line.desc || ''}" oninput="window.currentExpenseLines[${idx}].desc = this.value">
+            </div>
 
-          
-          <div>
-            <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Amount (₹) *</label>
-            <input type="number" class="form-control form-control-sm" min="1" placeholder="450" value="${line.amount}" oninput="window.currentExpenseLines[${idx}].amount = Number(this.value)||0; updateExpenseTotal()" required style="font-weight: 700;">
-          </div>
+            <div>
+              <label class="form-label" style="font-size: 0.725rem; font-weight: 600;">Amount (₹) *</label>
+              <input type="number" class="form-control form-control-sm" min="1" placeholder="0" value="${line.amount || ''}" oninput="window.currentExpenseLines[${idx}].amount = Number(this.value)||0; updateExpenseTotal()" required style="font-weight: 700; color: var(--text-main);">
+            </div>
 
-          
-          <div style="padding-top: 18px;">
-            ${window.currentExpenseLines.length > 1 ? `
-              <button type="button" class="btn btn-danger btn-sm" onclick="removeExpenseLineItem(${idx})" title="Remove item"><i class="fas fa-trash"></i></button>
-            ` : ''}
+            <div style="padding-top: 18px;">
+              ${window.currentExpenseLines.length > 1 ? `
+                <button type="button" class="btn btn-danger btn-sm" onclick="removeExpenseLineItem(${idx})" title="Remove line item" style="width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px;"><i class="fas fa-trash"></i></button>
+              ` : `
+                <button type="button" class="btn btn-secondary btn-sm disabled" disabled style="width: 28px; height: 28px; padding: 0; opacity: 0.3; border-radius: 4px;"><i class="fas fa-trash"></i></button>
+              `}
+            </div>
           </div>
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     updateExpenseTotal();
   }
+
+  // Industry Standard: Quick Mileage / KM Allowance Calculator
+  window.openMileageCalcModal = function(lineIdx) {
+    const km = prompt("Enter distance travelled in Kilometers (KM):", "35");
+    if (!km || isNaN(km)) return;
+    const rate = prompt("Enter Mileage Rate per KM (₹):", "7.0");
+    if (!rate || isNaN(rate)) return;
+
+    const calcAmount = Math.round(Number(km) * Number(rate));
+    if (window.currentExpenseLines[lineIdx]) {
+      window.currentExpenseLines[lineIdx].desc = `${km} KM @ ₹${rate}/km`;
+      window.currentExpenseLines[lineIdx].amount = calcAmount;
+      renderExpenseModalLines();
+      showToast(`Mileage calculated: ${km} km × ₹${rate} = ₹${calcAmount.toLocaleString()}`, "success");
+    }
+  };
 
   function addExpenseLineItem() {
     const today = new Date().toISOString().split('T')[0];
     window.currentExpenseLines.push({
       id: window.currentExpenseLines.length + 1,
       date: today,
-      category: state.masters.expenseCategories[0] || "Petrol / Travel Allowance",
+      category: (state.masters.expenseCategories || [])[0] || "Petrol / Travel Allowance",
       desc: "",
       amount: ""
     });
@@ -7979,10 +8322,13 @@ h1, h2, h3, h4, h5, h6 {
 
   function updateExpenseTotal() {
     const total = window.currentExpenseLines.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const count = window.currentExpenseLines.length;
     const el = document.getElementById("exp-grand-total");
+    const countEl = document.getElementById("exp-total-items-count");
     if (el) el.innerText = `₹${total.toLocaleString()}`;
+    if (countEl) countEl.innerText = `${count} ${count === 1 ? 'Item' : 'Items'}`;
 
-    // Smart ERP Helper: If claim > 5000 and still set to 1 layer, recommend 2 layers
+    // Auto workflow recommendation: If claim > 5000 and 1 layer, auto-recommend 2 layers
     const layersSelect = document.getElementById("exp-layers-count");
     if (layersSelect && total >= 5000 && Number(layersSelect.value) === 1 && !window.editingClaimId) {
       layersSelect.value = "2";
@@ -8002,6 +8348,14 @@ h1, h2, h3, h4, h5, h6 {
     const approver2 = layersCount >= 2 ? document.getElementById("exp-approver-2").value : "";
     const approver3 = layersCount >= 3 ? document.getElementById("exp-approver-3").value : "";
 
+    // Linked Visit detection
+    const linkedVisitId = window.activeLinkedVisitId || "";
+    let linkedClientId = "";
+    if (linkedVisitId) {
+      const v = (state.visits || []).find(x => x.Visit_ID === linkedVisitId);
+      if (v) linkedClientId = v.Client_ID || "";
+    }
+
     if (layersCount >= 2 && !approver2) {
       showToast("Please select a 2nd Level Approver.", "error");
       return;
@@ -8013,7 +8367,7 @@ h1, h2, h3, h4, h5, h6 {
 
     const validLines = window.currentExpenseLines.filter(l => Number(l.amount) > 0);
     if (validLines.length === 0) {
-      showToast("Please add at least one valid expense line item.", "error");
+      showToast("Please enter at least one valid expense line item amount.", "error");
       return;
     }
 
@@ -8022,10 +8376,12 @@ h1, h2, h3, h4, h5, h6 {
 
     if (window.editingClaimId) {
       // Update existing claim
-      const exp = state.expenses.find(x => x.Claim_ID === window.editingClaimId);
+      const exp = (state.expenses || []).find(x => x.Claim_ID === window.editingClaimId);
       if (exp) {
         exp.Title = title;
         exp.Date = date;
+        exp.Linked_Visit_ID = linkedVisitId;
+        exp.Client_ID = linkedClientId;
         exp.Layers_Count = layersCount;
         exp.Approver_1_ID = approver1;
         exp.Approver_2_ID = approver2;
@@ -8041,15 +8397,17 @@ h1, h2, h3, h4, h5, h6 {
         if (document.getElementById("exp-file-img")?.src) exp.Attachment = document.getElementById("exp-file-img").src;
       }
       closeModal();
-      renderView("expenses");
+      renderExpenses();
       showToast(`Claim ${claimId} successfully updated and re-routed for approval!`, "success");
     } else {
       // Create brand new claim
       const newClaim = {
         Claim_ID: claimId,
         Date: date,
-        User_ID: state.currentUser.User_ID,
+        User_ID: state.currentUser ? state.currentUser.User_ID : "USR-102",
         Title: title,
+        Linked_Visit_ID: linkedVisitId,
+        Client_ID: linkedClientId,
         Layers_Count: layersCount,
         Approver_1_ID: approver1,
         Approver_1_Status: "PENDING",
@@ -8079,23 +8437,24 @@ h1, h2, h3, h4, h5, h6 {
 
       state.expenses.unshift(newClaim);
       closeModal();
-      renderView("expenses");
+      renderExpenses();
       showToast(`Claim ${claimId} (₹${totalAmount.toLocaleString()}) submitted for Level 1 approval to ${getUserName(approver1)}!`, "success");
     }
 
     window.editingClaimId = null;
+    window.activeLinkedVisitId = "";
 
-    // Asynchronously sync with Google Sheets Database
+    // Asynchronously sync with backend
     if (typeof syncRecordToBackend === 'function') {
       syncRecordToBackend('save_expense', state.expenses.find(x => x.Claim_ID === claimId));
     }
   }
 
   /**
-   * 4. FOLLOW-UP / REMINDER DISPATCH (NOTIFIES CURRENT LEVEL REVIEWER OR ACCOUNTS)
+   * 4. FOLLOW-UP / REMINDER DISPATCH (WHATSAPP / EMAIL)
    */
   function sendExpenseFollowUp(claimId) {
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
+    const claim = (state.expenses || []).find(e => e.Claim_ID === claimId);
     if (!claim) return;
 
     const status = claim.Overall_Approval_Status || claim.Manager_Status;
@@ -8120,11 +8479,11 @@ h1, h2, h3, h4, h5, h6 {
       return;
     }
 
-    const reviewer = state.users.find(u => u.User_ID === targetUserId) || { Full_Name: "Approver", Phone: "", Email: "" };
-    const claimant = state.users.find(u => u.User_ID === claim.User_ID) || { Full_Name: "Employee" };
+    const reviewer = (state.users || []).find(u => u.User_ID === targetUserId) || { Full_Name: "Approver", Mobile: "", Email: "" };
+    const claimant = (state.users || []).find(u => u.User_ID === claim.User_ID) || { Full_Name: "Employee" };
 
     const subject = `Gentle Reminder: Expense Claim #${claim.Claim_ID} (₹${Number(claim.Total_Amount).toLocaleString()}) - ${stageTitle}`;
-    const body = `Dear ${reviewer.Full_Name},\n\nThis is a gentle reminder regarding Expense Claim #${claim.Claim_ID} for ₹${Number(claim.Total_Amount).toLocaleString()} submitted by ${claimant.Full_Name} on ${claim.Date}.\n\n*Claim Summary:*\n• Claim ID: ${claim.Claim_ID}\n• Purpose / Title: ${claim.Title || 'Field Travel'}\n• Total Amount: ₹${Number(claim.Total_Amount).toLocaleString()}\n• Pending Stage: ${stageTitle}\n\nKindly review and process the approval / settlement at your earliest convenience.\n\nThank you,\n${state.currentUser.Full_Name}\n${state.company.name}\nNexallot Operations Hub`;
+    const body = `Dear ${reviewer.Full_Name},\n\nThis is a gentle reminder regarding Expense Claim #${claim.Claim_ID} for ₹${Number(claim.Total_Amount).toLocaleString()} submitted by ${claimant.Full_Name} on ${claim.Date}.\n\n*Claim Summary:*\n• Claim ID: ${claim.Claim_ID}\n• Purpose / Title: ${claim.Title || 'Field Travel'}\n${claim.Linked_Visit_ID ? `• Linked Field Visit: ${claim.Linked_Visit_ID} (${getClientName(claim.Client_ID)})\n` : ''}• Total Amount: ₹${Number(claim.Total_Amount).toLocaleString()}\n• Pending Stage: ${stageTitle}\n\nKindly review and process the approval / settlement at your earliest convenience.\n\nThank you,\n${state.currentUser ? state.currentUser.Full_Name : 'Nexallot Operations'}\nNexallot Operations Hub`;
 
     commsData = {
       phone: reviewer.Mobile || reviewer.Phone || "",
@@ -8134,350 +8493,81 @@ h1, h2, h3, h4, h5, h6 {
       clientName: `${reviewer.Full_Name} (${stageTitle})`
     };
 
-    document.getElementById("comms-modal-title").innerHTML = `<i class="fas fa-bell" style="color:var(--primary);"></i> Send Follow-up Reminder: ${claim.Claim_ID}`;
-    document.getElementById("comms-subject-input").value = subject;
-    document.getElementById("comms-text-area").value = body;
-    document.getElementById("comms-recipient-name").innerText = commsData.clientName;
-    document.getElementById("comms-recipient-details").innerText = `Role: ${reviewer.Role || 'Approver'} | Phone: ${commsData.phone || '-'} | Email: ${commsData.email || '-'}`;
-    document.getElementById("comms-share-modal").classList.add("show");
+    const titleEl = document.getElementById("comms-modal-title");
+    const subInput = document.getElementById("comms-subject-input");
+    const textArea = document.getElementById("comms-text-area");
+    const recName = document.getElementById("comms-recipient-name");
+    const recDetails = document.getElementById("comms-recipient-details");
+    const commsModal = document.getElementById("comms-share-modal");
+
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-bell" style="color:var(--primary);"></i> Send Follow-up Reminder: ${claim.Claim_ID}`;
+    if (subInput) subInput.value = subject;
+    if (textArea) textArea.value = body;
+    if (recName) recName.innerText = commsData.clientName;
+    if (recDetails) recDetails.innerText = `Role: ${reviewer.Role || 'Approver'} | Phone: ${commsData.phone || '-'} | Email: ${commsData.email || '-'}`;
+    if (commsModal) commsModal.classList.add("show");
   }
 
   /**
-   * 5. MULTI-LEVEL APPROVAL POPUP MODAL (L1, L2, & L3)
+   * 5. EXPORT EXPENSES TO CSV (Industry Standard Accounting Integration)
    */
-  function openExpenseApprovalModal(claimId, level) {
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
-    if (!claim) return;
+  function exportExpensesToCsv() {
+    const rawExpenses = state.expenses || [];
+    const expensesList = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(rawExpenses, "User_ID") : rawExpenses;
 
-    const modal = document.getElementById("modal-container");
-    modal.innerHTML = `
-      <div class="modal-overlay show" id="active-modal">
-        <div class="modal-container" style="max-width: 580px;">
-          <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-signature" style="color: var(--primary); margin-right: 0.5rem;"></i> Sign-off Level ${level} Approval: ${claimId}</h3>
-            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="modal-body">
-            <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
-                <span><strong>Employee:</strong> ${getUserName(claim.User_ID)}</span>
-                <span style="font-weight: 700; color: var(--primary);">Total: ₹${Number(claim.Total_Amount).toLocaleString()}</span>
-              </div>
-              <div style="font-size: 0.8rem; color: var(--text-muted);"><strong>Title:</strong> ${claim.Title || 'Expense Claim'} | <strong>Date:</strong> ${claim.Date}</div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Review Remarks / Approval Notes</label>
-              <textarea class="form-control" id="exp-sign-remarks" rows="3" placeholder="e.g. Verified client visits and travel receipts. Approved."></textarea>
-            </div>
-          </div>
-          <div class="modal-footer" style="justify-content: space-between;">
-            <button type="button" class="btn btn-danger btn-sm" onclick="processExpenseDecision('${claimId}', ${level}, 'REJECTED')"><i class="fas fa-times"></i> Reject</button>
-            <div style="display: flex; gap: 8px;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="processExpenseDecision('${claimId}', ${level}, 'CLARITY_NEEDED')"><i class="fas fa-question-circle"></i> Request Clarity</button>
-              <button type="button" class="btn btn-success" onclick="processExpenseDecision('${claimId}', ${level}, 'APPROVED')"><i class="fas fa-check"></i> Approve Level ${level}</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  function processExpenseDecision(claimId, level, decision) {
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
-    if (!claim) return;
-
-    const remarks = document.getElementById("exp-sign-remarks")?.value || "";
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
-
-    if (level === 1) {
-      claim.Approver_1_Status = decision;
-      claim.Approver_1_Remarks = remarks;
-      claim.Approver_1_Date = nowStr;
-
-      if (decision === "APPROVED") {
-        if (claim.Requires_L2 && claim.Approver_2_ID) {
-          claim.Overall_Approval_Status = "PENDING_L2";
-          showToast(`Level 1 Signed! Claim routed to Level 2 Approver (${getUserName(claim.Approver_2_ID)}).`, "success");
-        } else {
-          claim.Overall_Approval_Status = "APPROVED";
-          showToast(`Claim ${claimId} fully approved! Forwarded to Accounts for payout.`, "success");
-        }
-      } else {
-        claim.Overall_Approval_Status = decision;
-        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
-      }
-    } else if (level === 2) {
-      claim.Approver_2_Status = decision;
-      claim.Approver_2_Remarks = remarks;
-      claim.Approver_2_Date = nowStr;
-
-      if (decision === "APPROVED") {
-        if (claim.Requires_L3 && claim.Approver_3_ID) {
-          claim.Overall_Approval_Status = "PENDING_L3";
-          showToast(`Level 2 Signed! Claim routed to Level 3 Approver (${getUserName(claim.Approver_3_ID)}).`, "success");
-        } else {
-          claim.Overall_Approval_Status = "APPROVED";
-          showToast(`Level 2 Signed! Claim ${claimId} fully approved for Accounts payout.`, "success");
-        }
-      } else {
-        claim.Overall_Approval_Status = decision;
-        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
-      }
-    } else if (level === 3) {
-      claim.Approver_3_Status = decision;
-      claim.Approver_3_Remarks = remarks;
-      claim.Approver_3_Date = nowStr;
-
-      if (decision === "APPROVED") {
-        claim.Overall_Approval_Status = "APPROVED";
-        showToast(`Level 3 Signed! Claim ${claimId} fully approved for Accounts payout.`, "success");
-      } else {
-        claim.Overall_Approval_Status = decision;
-        showToast(`Claim ${claimId} marked as ${decision}.`, "info");
-      }
+    if (expensesList.length === 0) {
+      showToast("No expense records available to export.", "info");
+      return;
     }
 
-    closeModal();
-    renderView("expenses");
+    const headers = ["Claim_ID", "Date", "Employee_ID", "Employee_Name", "Title", "Linked_Visit_ID", "Client_Name", "Total_Amount", "Approval_Status", "Accounts_Status", "Payment_Mode", "UTR_Ref", "Line_Items_Count"];
+    const rows = expensesList.map(e => {
+      let lines = e.Line_Items || [];
+      if (!Array.isArray(lines) && e.Line_Items_JSON) {
+        try { lines = JSON.parse(e.Line_Items_JSON); } catch(err) { lines = []; }
+      }
+      return [
+        `"${e.Claim_ID}"`,
+        `"${e.Date || ''}"`,
+        `"${e.User_ID || ''}"`,
+        `"${getUserName(e.User_ID)}"`,
+        `"${(e.Title || '').replace(/"/g, '""')}"`,
+        `"${e.Linked_Visit_ID || 'DIRECT'}"`,
+        `"${getClientName(e.Client_ID) || 'N/A'}"`,
+        Number(e.Total_Amount || 0),
+        `"${e.Overall_Approval_Status || e.Manager_Status || 'PENDING'}"`,
+        `"${e.Accounts_Status || 'PENDING'}"`,
+        `"${e.Accounts_Payment_Mode || ''}"`,
+        `"${e.Accounts_UTR_Ref || ''}"`,
+        lines.length
+      ].join(',');
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Nexallot_Expense_Claims_${new Date().toISOString().substring(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Expense claims exported to CSV successfully!", "success");
   }
 
-  /**
-   * 6. ACCOUNTS SETTLEMENT & PAYOUT MODAL
-   */
-  function openExpenseSettlementModal(claimId) {
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
-    if (!claim) return;
-
-    const today = new Date().toISOString().split('T')[0];
-    const modal = document.getElementById("modal-container");
-    modal.innerHTML = `
-      <div class="modal-overlay show" id="active-modal">
-        <div class="modal-container" style="max-width: 580px;">
-          <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-file-invoice-dollar" style="color: var(--primary); margin-right: 0.5rem;"></i> Settle & Disburse Expense: ${claimId}</h3>
-            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
-          </div>
-          <form onsubmit="handleAccountsSettlementSubmit(event, '${claimId}')">
-            <div class="modal-body">
-              
-              <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
-                  <span><strong>Employee:</strong> ${getUserName(claim.User_ID)}</span>
-                  <span style="font-size: 1.1rem; font-weight: 800; color: var(--primary);">Payout Due: ₹${Number(claim.Total_Amount).toLocaleString()}</span>
-                </div>
-                <div style="font-size: 0.775rem; color: var(--text-muted);"><i class="fas fa-check-double" style="color:var(--success);"></i> Fully Signed-off by L1: ${getUserName(claim.Approver_1_ID)} ${claim.Requires_L2 ? '& L2: ' + getUserName(claim.Approver_2_ID) : ''} ${claim.Requires_L3 ? '& L3: ' + getUserName(claim.Approver_3_ID) : ''}</div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                  <label class="form-label">Disbursement Mode *</label>
-                  <select class="form-control" id="settle-mode" required>
-                    <option value="NEFT / Bank Transfer">NEFT / Bank Transfer</option>
-                    <option value="UPI / Instant Transfer">UPI / Instant Transfer</option>
-                    <option value="Company Cash Reimbursement">Cash Reimbursement</option>
-                    <option value="Corporate Cheque">Corporate Cheque</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">Settlement Date *</label>
-                  <input type="date" class="form-control" id="settle-date" value="${today}" required>
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Transaction / UTR / Reference No *</label>
-                <input type="text" class="form-control" id="settle-utr" placeholder="e.g. UTR-HDFC-99182312 or Cash Voucher #102" required>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Accounts Settlement Remarks</label>
-                <input type="text" class="form-control" id="settle-remarks" placeholder="e.g. Processed via batch payroll reimbursement">
-              </div>
-
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-              <button type="submit" class="btn btn-primary"><i class="fas fa-check-circle"></i> Confirm Payout & Settle</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    `;
-  }
-
-  function handleAccountsSettlementSubmit(e, claimId) {
-    e.preventDefault();
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
-    if (!claim) return;
-
-    const mode = document.getElementById("settle-mode").value;
-    const date = document.getElementById("settle-date").value;
-    const utr = document.getElementById("settle-utr").value;
-    const remarks = document.getElementById("settle-remarks").value;
-
-    claim.Accounts_Status = "SETTLED";
-    claim.Accounts_Payment_Mode = mode;
-    claim.Accounts_Settled_Date = date;
-    claim.Accounts_UTR_Ref = utr;
-    claim.Accounts_Remarks = remarks;
-
-    closeModal();
-    renderView("expenses");
-    showToast(`Claim ${claimId} successfully settled & marked as PAID via ${mode}!`, "success");
-
-    // Asynchronously update backend Google Sheet
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res && res.success) console.log("Expense settlement synced to backend:", res);
-      })
-      .withFailureHandler(err => {
-        console.warn("Backend expense settlement notice:", err);
-      })
-      .updateExpenseStatus(state.license.key, claimId, "ACCOUNTS", "SETTLED", `${mode} | Ref: ${utr}`);
-  }
-
-  /**
-   * 7. DETAILED EXPENSE AUDIT TRAIL & LINE ITEMS MODAL
-   */
-  function openExpenseDetailsModal(claimId) {
-    const claim = state.expenses.find(e => e.Claim_ID === claimId);
-    if (!claim) return;
-
-    const lines = claim.Line_Items || [];
-    const isL1Done = claim.Approver_1_Status === "APPROVED";
-    const isL2Done = !claim.Requires_L2 || claim.Approver_2_Status === "APPROVED";
-    const isL3Done = !claim.Requires_L3 || claim.Approver_3_Status === "APPROVED";
-    const isSettled = claim.Accounts_Status === "SETTLED";
-
-    const modal = document.getElementById("modal-container");
-    modal.innerHTML = `
-      <div class="modal-overlay show" id="active-modal">
-        <div class="modal-container modal-lg">
-          <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-file-alt" style="color: var(--primary); margin-right: 0.5rem;"></i> Expense Claim Details: ${claimId}</h3>
-            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="modal-body">
-            
-            
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; background: var(--bg-primary); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 14px;">
-              <div>
-                <h4 style="margin: 0 0 4px; font-size: 1rem;">${claim.Title || 'Expense Claim'}</h4>
-                <div style="font-size: 0.8rem; color: var(--text-muted);">
-                  <strong>Employee:</strong> ${getUserName(claim.User_ID)} (${claim.User_ID}) | <strong>Date:</strong> ${claim.Date}
-                </div>
-              </div>
-              <div style="text-align: right;">
-                <div style="font-size: 0.75rem; color: var(--text-muted);">Total Claim Amount</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: var(--primary);">₹${Number(claim.Total_Amount).toLocaleString()}</div>
-              </div>
-            </div>
-
-            
-            <div class="exp-timeline">
-              
-              <div class="exp-step completed">
-                <div class="exp-step-icon"><i class="fas fa-paper-plane"></i></div>
-                <div class="exp-step-title">Submitted</div>
-                <div class="exp-step-sub">${claim.Date}</div>
-              </div>
-
-              
-              <div class="exp-step ${isL1Done ? 'completed' : (claim.Approver_1_Status === 'REJECTED' ? 'rejected' : 'active')}">
-                <div class="exp-step-icon"><i class="fas fa-user-check"></i></div>
-                <div class="exp-step-title">1st Approver</div>
-                <div class="exp-step-sub">${getUserName(claim.Approver_1_ID)} (${claim.Approver_1_Status || 'PENDING'})</div>
-              </div>
-
-              
-              ${claim.Requires_L2 ? `
-                <div class="exp-step ${isL2Done && isL1Done ? 'completed' : (claim.Approver_2_Status === 'REJECTED' ? 'rejected' : (isL1Done ? 'active' : ''))}">
-                  <div class="exp-step-icon"><i class="fas fa-user-shield"></i></div>
-                  <div class="exp-step-title">2nd Approver</div>
-                  <div class="exp-step-sub">${getUserName(claim.Approver_2_ID)} (${claim.Approver_2_Status || 'PENDING'})</div>
-                </div>
-              ` : ''}
-
-              
-              ${claim.Requires_L3 ? `
-                <div class="exp-step ${isL3Done && isL2Done && isL1Done ? 'completed' : (claim.Approver_3_Status === 'REJECTED' ? 'rejected' : (isL2Done && isL1Done ? 'active' : ''))}">
-                  <div class="exp-step-icon"><i class="fas fa-user-tie"></i></div>
-                  <div class="exp-step-title">3rd Approver</div>
-                  <div class="exp-step-sub">${getUserName(claim.Approver_3_ID)} (${claim.Approver_3_Status || 'PENDING'})</div>
-                </div>
-              ` : ''}
-
-              
-              <div class="exp-step ${isSettled ? 'completed' : (isL1Done && isL2Done && isL3Done ? 'active' : '')}">
-                <div class="exp-step-icon"><i class="fas fa-hand-holding-usd"></i></div>
-                <div class="exp-step-title">Accounts Payout</div>
-                <div class="exp-step-sub">${claim.Accounts_Status === 'SETTLED' ? 'SETTLED' : 'Pending'}</div>
-              </div>
-            </div>
-
-            
-            <h4 style="font-size: 0.9rem; font-weight: 700; margin: 16px 0 8px;"><i class="fas fa-list-check" style="color: var(--primary);"></i> Itemized Breakdown (${lines.length} items)</h4>
-            <table class="order-items-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Date</th>
-                  <th>Category</th>
-                  <th>Description / Route / Purpose</th>
-                  <th style="text-align: right;">Amount (₹)</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${lines.map((it, idx) => `
-                  <tr>
-                    <td>${idx + 1}</td>
-                    <td>${it.date || claim.Date}</td>
-                    <td><span class="badge badge-on-hold">${it.category}</span></td>
-                    <td>${it.desc || '-'}</td>
-                    <td style="text-align: right; font-weight: 700; color: var(--primary);">₹${Number(it.amount).toLocaleString()}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-
-            
-            ${claim.Attachment ? `
-              <div style="margin-top: 14px; font-size: 0.85rem;">
-                <strong>Attached Bills & Receipts:</strong>
-                <div style="margin-top: 6px;">
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="openAttachmentViewer('EXPENSE', '${claim.Claim_ID}')"><i class="fas fa-paperclip"></i> View Uploaded Bill Receipt Attachment</button>
-                </div>
-              </div>
-            ` : ''}
-
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-// Global Exports
-window.renderExpenses = typeof renderExpenses !== 'undefined' ? renderExpenses : undefined;
-window.filterExpensesTable = typeof filterExpensesTable !== 'undefined' ? filterExpensesTable : undefined;
-window.renderExpenseRows = typeof renderExpenseRows !== 'undefined' ? renderExpenseRows : undefined;
-window.openNewExpenseModal = typeof openNewExpenseModal !== 'undefined' ? openNewExpenseModal : undefined;
-window.handleExpenseLayersCountChange = typeof handleExpenseLayersCountChange !== 'undefined' ? handleExpenseLayersCountChange : undefined;
-window.renderExpenseModalLines = typeof renderExpenseModalLines !== 'undefined' ? renderExpenseModalLines : undefined;
-window.addExpenseLineItem = typeof addExpenseLineItem !== 'undefined' ? addExpenseLineItem : undefined;
-window.removeExpenseLineItem = typeof removeExpenseLineItem !== 'undefined' ? removeExpenseLineItem : undefined;
-window.handleExpenseReceiptCapture = typeof handleExpenseReceiptCapture !== 'undefined' ? handleExpenseReceiptCapture : undefined;
-window.handleExpenseSubmit = typeof handleExpenseSubmit !== 'undefined' ? handleExpenseSubmit : undefined;
-window.openExpenseApprovalModal = typeof openExpenseApprovalModal !== 'undefined' ? openExpenseApprovalModal : undefined;
-window.handleExpenseApprovalSubmit = typeof handleExpenseApprovalSubmit !== 'undefined' ? handleExpenseApprovalSubmit : undefined;
-window.openExpenseSettlementModal = typeof openExpenseSettlementModal !== 'undefined' ? openExpenseSettlementModal : undefined;
-window.handleAccountsSettlementSubmit = typeof handleAccountsSettlementSubmit !== 'undefined' ? handleAccountsSettlementSubmit : undefined;
-window.openExpenseDetailsModal = typeof openExpenseDetailsModal !== 'undefined' ? openExpenseDetailsModal : undefined;
-window.sendExpenseFollowUp = typeof sendExpenseFollowUp !== 'undefined' ? sendExpenseFollowUp : undefined;
+  // Global Exports
+  window.renderExpenses = renderExpenses;
+  window.filterExpensesTable = filterExpensesTable;
+  window.renderExpenseRows = renderExpenseRows;
+  window.openNewExpenseModal = openNewExpenseModal;
+  window.handleExpenseLayersCountChange = handleExpenseLayersCountChange;
+  window.renderExpenseModalLines = renderExpenseModalLines;
+  window.addExpenseLineItem = addExpenseLineItem;
+  window.removeExpenseLineItem = removeExpenseLineItem;
+  window.updateExpenseTotal = updateExpenseTotal;
+  window.handleExpenseSubmit = handleExpenseSubmit;
+  window.sendExpenseFollowUp = sendExpenseFollowUp;
+  window.exportExpensesToCsv = exportExpensesToCsv;
+})();
 </script>
   <script>
 function openExpenseApprovalModal(claimId, level) {
@@ -8710,6 +8800,29 @@ function openExpenseApprovalModal(claimId, level) {
               </div>
             </div>
 
+            <!-- Site Visit Linkage Indicator -->
+            ${claim.Linked_Visit_ID ? `
+              <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                <div>
+                  <div style="font-size: 0.725rem; text-transform: uppercase; font-weight: 700; color: #0284c7; letter-spacing: 0.5px; display: flex; align-items: center; gap: 5px;">
+                    <i class="fas fa-link"></i> Linked Site / Field Visit
+                  </div>
+                  <div style="font-size: 0.85rem; font-weight: 600; color: var(--text-main); margin-top: 2px;">
+                    <span>Visit ID: <strong style="color: #0284c7;">${claim.Linked_Visit_ID}</strong></span>
+                    ${claim.Client_ID ? `<span style="margin-left: 8px; color: var(--text-muted);">• Client: <strong>${getClientName(claim.Client_ID)}</strong></span>` : ''}
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="typeof openVisitDetailsModal === 'function' ? openVisitDetailsModal('${claim.Linked_Visit_ID}') : showToast('Visit ID: ${claim.Linked_Visit_ID}', 'info')" style="font-size: 0.75rem; padding: 4px 10px;">
+                  <i class="fas fa-map-marker-alt" style="color: #0284c7;"></i> View Visit Details
+                </button>
+              </div>
+            ` : `
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+                <span class="badge badge-secondary" style="font-size: 0.7rem;"><i class="fas fa-bolt"></i> Direct Claim</span>
+                <span>This expense was submitted directly as an independent claim (not against any site visit).</span>
+              </div>
+            `}
+
             
             <div class="exp-timeline">
               
@@ -8808,6 +8921,7 @@ window.removeExpenseLineItem = typeof removeExpenseLineItem !== 'undefined' ? re
 window.handleExpenseReceiptCapture = typeof handleExpenseReceiptCapture !== 'undefined' ? handleExpenseReceiptCapture : undefined;
 window.handleExpenseSubmit = typeof handleExpenseSubmit !== 'undefined' ? handleExpenseSubmit : undefined;
 window.openExpenseApprovalModal = typeof openExpenseApprovalModal !== 'undefined' ? openExpenseApprovalModal : undefined;
+window.processExpenseDecision = typeof processExpenseDecision !== 'undefined' ? processExpenseDecision : undefined;
 window.handleExpenseApprovalSubmit = typeof handleExpenseApprovalSubmit !== 'undefined' ? handleExpenseApprovalSubmit : undefined;
 window.openExpenseSettlementModal = typeof openExpenseSettlementModal !== 'undefined' ? openExpenseSettlementModal : undefined;
 window.handleAccountsSettlementSubmit = typeof handleAccountsSettlementSubmit !== 'undefined' ? handleAccountsSettlementSubmit : undefined;
