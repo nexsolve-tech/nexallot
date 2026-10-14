@@ -2949,6 +2949,30 @@ h1, h2, h3, h4, h5, h6 {
   };
   window.state = state;
 
+  // Hydrate users cache and profile photos from localStorage immediately on boot
+  try {
+    const cachedUsersJson = localStorage.getItem("nexallot_users_cache");
+    if (cachedUsersJson) {
+      const parsedUsers = JSON.parse(cachedUsersJson);
+      if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
+        state.users = parsedUsers;
+      }
+    }
+    const photosMapJson = localStorage.getItem("nexallot_user_photos");
+    const photosMap = photosMapJson ? JSON.parse(photosMapJson) : {};
+    (state.users || []).forEach(u => {
+      if (!u.Photo && photosMap[u.User_ID]) {
+        u.Photo = photosMap[u.User_ID];
+      }
+    });
+    const curPhoto = localStorage.getItem("nexallot_current_user_photo");
+    if (curPhoto && state.currentUser) {
+      state.currentUser.Photo = curPhoto;
+    }
+  } catch(e) {
+    console.warn("User cache hydration error:", e);
+  }
+
   // Toast Helper
   function showToast(message, type = "info") {
     const container = document.getElementById("toast-container");
@@ -3072,9 +3096,18 @@ h1, h2, h3, h4, h5, h6 {
 
     const matchingUser = (state.users || []).find(u => u.User_ID === state.currentUser.User_ID);
     if (matchingUser) {
-      state.currentUser.Photo = matchingUser.Photo || "";
+      const photosMapJson = localStorage.getItem("nexallot_user_photos");
+      let photosMap = {};
+      try { photosMap = photosMapJson ? JSON.parse(photosMapJson) : {}; } catch(e) {}
+      state.currentUser.Photo = matchingUser.Photo || photosMap[state.currentUser.User_ID] || "";
       state.currentUser.Department = matchingUser.Department || state.currentUser.Department;
       state.currentUser.Designation = matchingUser.Designation || state.currentUser.Designation;
+    }
+    localStorage.setItem("nexallot_session_user", JSON.stringify(state.currentUser));
+    if (state.currentUser.Photo) {
+      localStorage.setItem("nexallot_current_user_photo", state.currentUser.Photo);
+    } else {
+      localStorage.removeItem("nexallot_current_user_photo");
     }
 
     updateNavUserProfile();
@@ -3328,6 +3361,39 @@ h1, h2, h3, h4, h5, h6 {
   }
   window.handleFilePreview = handleFilePreview;
 
+  // Universal WhatsApp & Comms Hub
+  function openWhatsAppLink(phone, text) {
+    let cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
+    if (cleanPhone.length === 10) {
+      cleanPhone = '91' + cleanPhone;
+    } else if (cleanPhone.startsWith('0') && cleanPhone.length === 11) {
+      cleanPhone = '91' + cleanPhone.substring(1);
+    }
+    
+    const message = encodeURIComponent(text || '');
+    const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${message}` : `https://wa.me/?text=${message}`;
+    
+    let opened = false;
+    try {
+      const win = window.open(url, '_blank');
+      if (win && !win.closed && typeof win.closed !== 'undefined') {
+        opened = true;
+      }
+    } catch (e) {}
+
+    if (!opened) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { a.remove(); }, 100);
+    }
+    showToast("Opening WhatsApp...", "success");
+  }
+  window.openWhatsAppLink = openWhatsAppLink;
+
   let currentCommsConfig = { onSendWhatsApp: null, onSendEmail: null };
 
   function openCommsModal(title, defaultSubject, defaultBody, recipientName, recipientDetails, onSendWhatsApp, onSendEmail) {
@@ -3360,16 +3426,68 @@ h1, h2, h3, h4, h5, h6 {
   window.closeCommsModal = closeCommsModal;
 
   function triggerCommsWhatsApp() {
+    const textEl = document.getElementById("comms-text-area");
+    const currentText = textEl ? textEl.value : "";
+
     if (typeof currentCommsConfig.onSendWhatsApp === 'function') {
-      currentCommsConfig.onSendWhatsApp();
+      try {
+        currentCommsConfig.onSendWhatsApp(currentText);
+        return;
+      } catch (err) {
+        console.warn("Comms callback error, falling back to direct send:", err);
+      }
     }
+
+    let phone = "";
+    if (window.currentCommsPayload && window.currentCommsPayload.phone) {
+      phone = window.currentCommsPayload.phone;
+    } else if (typeof commsData !== 'undefined' && commsData && commsData.phone) {
+      phone = commsData.phone;
+    }
+    if (!phone) {
+      const detailsEl = document.getElementById("comms-recipient-details");
+      if (detailsEl) {
+        const match = detailsEl.innerText.match(/(\+?\d[\d\s-]{8,15}\d)/);
+        if (match) phone = match[1];
+      }
+    }
+
+    openWhatsAppLink(phone, currentText);
   }
   window.triggerCommsWhatsApp = triggerCommsWhatsApp;
 
   function triggerCommsEmail() {
+    const subjEl = document.getElementById("comms-subject-input");
+    const textEl = document.getElementById("comms-text-area");
+    const currentSubj = subjEl ? subjEl.value : "";
+    const currentText = textEl ? textEl.value : "";
+
     if (typeof currentCommsConfig.onSendEmail === 'function') {
-      currentCommsConfig.onSendEmail();
+      try {
+        currentCommsConfig.onSendEmail(currentSubj, currentText);
+        return;
+      } catch (err) {
+        console.warn("Comms callback error, falling back to mailto:", err);
+      }
     }
+
+    let email = "";
+    if (window.currentCommsPayload && window.currentCommsPayload.email) {
+      email = window.currentCommsPayload.email;
+    } else if (typeof commsData !== 'undefined' && commsData && commsData.email) {
+      email = commsData.email;
+    }
+    if (!email) {
+      const detailsEl = document.getElementById("comms-recipient-details");
+      if (detailsEl) {
+        const match = detailsEl.innerText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        if (match) email = match[1];
+      }
+    }
+
+    const mailto = `mailto:${email}?subject=${encodeURIComponent(currentSubj)}&body=${encodeURIComponent(currentText)}`;
+    window.open(mailto, '_blank');
+    showToast("Opening Email client...", "info");
   }
   window.triggerCommsEmail = triggerCommsEmail;
 
@@ -3607,9 +3725,17 @@ h1, h2, h3, h4, h5, h6 {
     const nur = document.getElementById("nav-user-role");
     if (nur) nur.innerText = role;
     const nua = document.getElementById("nav-user-avatar");
-    if (nua) nua.innerText = initials;
+    if (nua) {
+      if (state.currentUser.Photo) {
+        nua.innerHTML = `<img src="${state.currentUser.Photo}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" alt="${name}">`;
+      } else {
+        nua.innerText = initials;
+      }
+    }
     const hrt = document.getElementById("header-role-text");
     if (hrt) hrt.innerText = role;
+
+    if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
 
     // Filter sidebar menu based on authenticated role
     document.querySelectorAll(".menu-item").forEach(item => {
@@ -3639,7 +3765,24 @@ h1, h2, h3, h4, h5, h6 {
       });
 
       if (data && data.success) {
-        if (Array.isArray(data.users)) state.users = data.users;
+        if (Array.isArray(data.users)) {
+          const photosMapJson = localStorage.getItem("nexallot_user_photos");
+          let photosMap = {};
+          try { photosMap = photosMapJson ? JSON.parse(photosMapJson) : {}; } catch(e) {}
+          state.users = data.users.map(u => {
+            if (!u.Photo && photosMap[u.User_ID]) {
+              u.Photo = photosMap[u.User_ID];
+            }
+            return u;
+          });
+          if (state.currentUser) {
+            const matching = state.users.find(u => u.User_ID === state.currentUser.User_ID);
+            if (matching && matching.Photo && !state.currentUser.Photo) {
+              state.currentUser.Photo = matching.Photo;
+            }
+          }
+          if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
+        }
         if (Array.isArray(data.clients)) {
           state.clients = data.clients.map(c => ({
             ...c,
@@ -3736,7 +3879,19 @@ h1, h2, h3, h4, h5, h6 {
     if (saved) {
       try {
         state.currentUser = JSON.parse(saved);
+        const savedCurPhoto = localStorage.getItem("nexallot_current_user_photo");
+        if (savedCurPhoto) {
+          state.currentUser.Photo = savedCurPhoto;
+        } else {
+          const photosMapJson = localStorage.getItem("nexallot_user_photos");
+          let photosMap = {};
+          try { photosMap = photosMapJson ? JSON.parse(photosMapJson) : {}; } catch(e) {}
+          if (photosMap[state.currentUser.User_ID]) {
+            state.currentUser.Photo = photosMap[state.currentUser.User_ID];
+          }
+        }
         updateAuthenticatedProfileUI();
+        updateNavUserProfile();
         hideLoginOverlay();
         renderView(state.currentView || "dashboard");
         loadLiveAppDataFromSheet();
@@ -6387,14 +6542,15 @@ h1, h2, h3, h4, h5, h6 {
       body,
       client.Client_Name || 'Customer',
       (client.Phone || '') + ' | ' + (client.Email || ''),
-      () => {
-        const ph = (client.Phone || '').replace(/[^0-9]/g, '');
-        const url = "https://api.whatsapp.com/send?phone=" + ph + "&text=" + encodeURIComponent(body);
-        window.open(url, '_blank');
-        showToast("WhatsApp notification sent!", "success");
+      (liveText) => {
+        if (typeof openWhatsAppLink === 'function') {
+          openWhatsAppLink(client.Phone, liveText || body);
+        } else {
+          window.open(`https://wa.me/91${(client.Phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(liveText || body)}`, '_blank');
+        }
       },
-      () => {
-        const url = "mailto:" + (client.Email || '') + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+      (liveSubj, liveText) => {
+        const url = "mailto:" + (client.Email || '') + "?subject=" + encodeURIComponent(liveSubj || subject) + "&body=" + encodeURIComponent(liveText || body);
         window.open(url, '_blank');
         showToast("Email notification drafted!", "success");
       }
@@ -7565,14 +7721,15 @@ h1, h2, h3, h4, h5, h6 {
       body,
       client.Client_Name || 'Customer',
       (client.Phone || '') + ' | ' + (client.Email || ''),
-      () => {
-        const ph = (client.Phone || '').replace(/[^0-9]/g, '');
-        const url = "https://api.whatsapp.com/send?phone=" + ph + "&text=" + encodeURIComponent(body);
-        window.open(url, '_blank');
-        showToast("WhatsApp receipt generated!", "success");
+      (liveText) => {
+        if (typeof openWhatsAppLink === 'function') {
+          openWhatsAppLink(client.Phone, liveText || body);
+        } else {
+          window.open(`https://wa.me/91${(client.Phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(liveText || body)}`, '_blank');
+        }
       },
-      () => {
-        const url = "mailto:" + (client.Email || '') + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+      (liveSubj, liveText) => {
+        const url = "mailto:" + (client.Email || '') + "?subject=" + encodeURIComponent(liveSubj || subject) + "&body=" + encodeURIComponent(liveText || body);
         window.open(url, '_blank');
         showToast("Email receipt generated!", "success");
       }
@@ -8571,19 +8728,24 @@ h1, h2, h3, h4, h5, h6 {
       clientName: `${reviewer.Full_Name} (${stageTitle})`
     };
 
-    const titleEl = document.getElementById("comms-modal-title");
-    const subInput = document.getElementById("comms-subject-input");
-    const textArea = document.getElementById("comms-text-area");
-    const recName = document.getElementById("comms-recipient-name");
-    const recDetails = document.getElementById("comms-recipient-details");
-    const commsModal = document.getElementById("comms-share-modal");
-
-    if (titleEl) titleEl.innerHTML = `<i class="fas fa-bell" style="color:var(--primary);"></i> Send Follow-up Reminder: ${claim.Claim_ID}`;
-    if (subInput) subInput.value = subject;
-    if (textArea) textArea.value = body;
-    if (recName) recName.innerText = commsData.clientName;
-    if (recDetails) recDetails.innerText = `Role: ${reviewer.Role || 'Approver'} | Phone: ${commsData.phone || '-'} | Email: ${commsData.email || '-'}`;
-    if (commsModal) commsModal.classList.add("show");
+    if (typeof openCommsModal === 'function') {
+      openCommsModal(
+        `Send Follow-up Reminder: ${claim.Claim_ID}`,
+        subject,
+        body,
+        commsData.clientName,
+        `Role: ${reviewer.Role || 'Approver'} | Phone: ${commsData.phone || '-'} | Email: ${commsData.email || '-'}`,
+        (liveText) => {
+          if (typeof openWhatsAppLink === 'function') openWhatsAppLink(commsData.phone, liveText || body);
+        },
+        (liveSubj, liveText) => {
+          window.open(`mailto:${commsData.email}?subject=${encodeURIComponent(liveSubj || subject)}&body=${encodeURIComponent(liveText || body)}`, '_blank');
+        }
+      );
+    } else {
+      const commsModal = document.getElementById("comms-share-modal");
+      if (commsModal) commsModal.classList.add("show");
+    }
   }
 
   /**
@@ -10136,8 +10298,24 @@ window.window.activeTicketCategoryFilter = window.window.activeTicketCategoryFil
       message: message
     };
 
-    const commsModal = document.getElementById("comms-share-modal");
-    if (commsModal) commsModal.classList.add("show");
+    if (typeof openCommsModal === 'function') {
+      openCommsModal(
+        `Share Ticket #${ticket.Ticket_ID} Update`,
+        subject,
+        message,
+        clientName,
+        `${clientPhone ? '📞 ' + clientPhone : ''} ${clientEmail ? '✉ ' + clientEmail : ''}`.trim() || 'No direct phone',
+        (liveText) => {
+          if (typeof openWhatsAppLink === 'function') openWhatsAppLink(clientPhone, liveText || message);
+        },
+        (liveSubj, liveText) => {
+          window.open(`mailto:${clientEmail}?subject=${encodeURIComponent(liveSubj || subject)}&body=${encodeURIComponent(liveText || message)}`, '_blank');
+        }
+      );
+    } else {
+      const commsModal = document.getElementById("comms-share-modal");
+      if (commsModal) commsModal.classList.add("show");
+    }
   }
 
 // Global Exports
@@ -11743,13 +11921,14 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
       return;
     }
 
-    const cleanPhone = client.Phone.replace(/[^0-9]/g, '');
-    const phoneWithCountry = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
     const balance = Number(client.Outstanding_Balance || 0);
+    const text = `Hello ${client.Contact_Person || client.Client_Name},\n\nGreetings from ${state.company.name}!\n\nThis is regarding your account with us (Account ID: ${client.Client_ID}).\n${balance > 0 ? `📌 Current Outstanding Balance: ₹${balance.toLocaleString()}\n` : '📌 Your account is fully reconciled.\n'}\nFor any assistance with orders, deliveries, or service, feel free to contact us.\n\nWarm regards,\n${state.currentUser.Full_Name}\n${state.company.name}\nPowered by NexSolve Training & Consulting`;
 
-    const text = encodeURIComponent(`Hello ${client.Contact_Person || client.Client_Name},\n\nGreetings from ${state.company.name}!\n\nThis is regarding your account with us (Account ID: ${client.Client_ID}).\n${balance > 0 ? `📌 Current Outstanding Balance: ₹${balance.toLocaleString()}\n` : '📌 Your account is fully reconciled.\n'}\nFor any assistance with orders, deliveries, or service, feel free to contact us.\n\nWarm regards,\n${state.currentUser.Full_Name}\n${state.company.name}\nPowered by NexSolve Training & Consulting`);
-
-    window.open(`https://api.whatsapp.com/send?phone=${phoneWithCountry}&text=${text}`, '_blank');
+    if (typeof openWhatsAppLink === 'function') {
+      openWhatsAppLink(client.Phone, text);
+    } else {
+      window.open(`https://wa.me/91${client.Phone.replace(/[^0-9]/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
+    }
   }
 
   function sendClientComms(clientId) {
@@ -11760,12 +11939,6 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
     const subject = `Account Statement & Ledger Summary - ${client.Client_Name}`;
     const message = `Dear ${client.Contact_Person || client.Client_Name},\n\nWe appreciate your continued partnership with ${state.company.name}.\n\n*Account Summary (as of today):*\n• Client Code: ${client.Client_ID}\n• Company Name: ${client.Client_Name}\n• Credit Limit: ₹${Number(client.Credit_Limit || 0).toLocaleString()}\n• Payment Terms: ${client.Payment_Terms || 'Net 30 Days'}\n• Current Outstanding Balance Due: ₹${balance.toLocaleString()}\n\nKindly review and arrange payment settlement as per the agreed credit period.\n\nFor any queries or account statement details, please reach out directly.\n\nThank you,\n${state.currentUser.Full_Name}\n${state.company.name}\n(Powered by NexSolve Training & Consulting)`;
 
-    document.getElementById("comms-modal-title").innerHTML = `<i class="fas fa-paper-plane" style="color: var(--primary);"></i> Send Account Statement to ${client.Client_Name}`;
-    document.getElementById("comms-subject-input").value = subject;
-    document.getElementById("comms-text-area").value = message;
-    document.getElementById("comms-recipient-name").textContent = client.Client_Name;
-    document.getElementById("comms-recipient-details").textContent = `${client.Phone ? '📞 ' + client.Phone : ''} ${client.Email ? '✉ ' + client.Email : ''}`.trim() || 'No direct phone';
-
     window.currentCommsPayload = {
       phone: client.Phone || "",
       email: client.Email || "",
@@ -11773,8 +11946,24 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
       message: message
     };
 
-    const commsModal = document.getElementById("comms-share-modal");
-    if (commsModal) commsModal.classList.add("show");
+    if (typeof openCommsModal === 'function') {
+      openCommsModal(
+        `Send Account Statement to ${client.Client_Name}`,
+        subject,
+        message,
+        client.Client_Name,
+        `${client.Phone ? '📞 ' + client.Phone : ''} ${client.Email ? '✉ ' + client.Email : ''}`.trim() || 'No direct phone',
+        (liveText) => {
+          if (typeof openWhatsAppLink === 'function') openWhatsAppLink(client.Phone, liveText || message);
+        },
+        (liveSubj, liveText) => {
+          window.open(`mailto:${client.Email || ''}?subject=${encodeURIComponent(liveSubj || subject)}&body=${encodeURIComponent(liveText || message)}`, '_blank');
+        }
+      );
+    } else {
+      const commsModal = document.getElementById("comms-share-modal");
+      if (commsModal) commsModal.classList.add("show");
+    }
   }
 
   function exportClientsCSV() {
@@ -12140,13 +12329,14 @@ window.openNewClientModal = window.openClientModal;
       return;
     }
 
-    const cleanPhone = client.Phone.replace(/[^0-9]/g, '');
-    const phoneWithCountry = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
     const balance = Number(client.Outstanding_Balance || 0);
+    const text = `Hello ${client.Contact_Person || client.Client_Name},\n\nGreetings from ${state.company.name}!\n\nThis is regarding your account with us (Account ID: ${client.Client_ID}).\n${balance > 0 ? `📌 Current Outstanding Balance: ₹${balance.toLocaleString()}\n` : '📌 Your account is fully reconciled.\n'}\nFor any assistance with orders, deliveries, or service, feel free to contact us.\n\nWarm regards,\n${state.currentUser.Full_Name}\n${state.company.name}\nPowered by NexSolve Training & Consulting`;
 
-    const text = encodeURIComponent(`Hello ${client.Contact_Person || client.Client_Name},\n\nGreetings from ${state.company.name}!\n\nThis is regarding your account with us (Account ID: ${client.Client_ID}).\n${balance > 0 ? `📌 Current Outstanding Balance: ₹${balance.toLocaleString()}\n` : '📌 Your account is fully reconciled.\n'}\nFor any assistance with orders, deliveries, or service, feel free to contact us.\n\nWarm regards,\n${state.currentUser.Full_Name}\n${state.company.name}\nPowered by NexSolve Training & Consulting`);
-
-    window.open(`https://api.whatsapp.com/send?phone=${phoneWithCountry}&text=${text}`, '_blank');
+    if (typeof openWhatsAppLink === 'function') {
+      openWhatsAppLink(client.Phone, text);
+    } else {
+      window.open(`https://wa.me/91${client.Phone.replace(/[^0-9]/g,'')}?text=${encodeURIComponent(text)}`, '_blank');
+    }
   }
 
   function sendClientComms(clientId) {
@@ -12157,12 +12347,6 @@ window.openNewClientModal = window.openClientModal;
     const subject = `Account Statement & Ledger Summary - ${client.Client_Name}`;
     const message = `Dear ${client.Contact_Person || client.Client_Name},\n\nWe appreciate your continued partnership with ${state.company.name}.\n\n*Account Summary (as of today):*\n• Client Code: ${client.Client_ID}\n• Company Name: ${client.Client_Name}\n• Credit Limit: ₹${Number(client.Credit_Limit || 0).toLocaleString()}\n• Payment Terms: ${client.Payment_Terms || 'Net 30 Days'}\n• Current Outstanding Balance Due: ₹${balance.toLocaleString()}\n\nKindly review and arrange payment settlement as per the agreed credit period.\n\nFor any queries or account statement details, please reach out directly.\n\nThank you,\n${state.currentUser.Full_Name}\n${state.company.name}\n(Powered by NexSolve Training & Consulting)`;
 
-    document.getElementById("comms-modal-title").innerHTML = `<i class="fas fa-paper-plane" style="color: var(--primary);"></i> Send Account Statement to ${client.Client_Name}`;
-    document.getElementById("comms-subject-input").value = subject;
-    document.getElementById("comms-text-area").value = message;
-    document.getElementById("comms-recipient-name").textContent = client.Client_Name;
-    document.getElementById("comms-recipient-details").textContent = `${client.Phone ? '📞 ' + client.Phone : ''} ${client.Email ? '✉ ' + client.Email : ''}`.trim() || 'No direct phone';
-
     window.currentCommsPayload = {
       phone: client.Phone || "",
       email: client.Email || "",
@@ -12170,8 +12354,24 @@ window.openNewClientModal = window.openClientModal;
       message: message
     };
 
-    const commsModal = document.getElementById("comms-share-modal");
-    if (commsModal) commsModal.classList.add("show");
+    if (typeof openCommsModal === 'function') {
+      openCommsModal(
+        `Send Account Statement to ${client.Client_Name}`,
+        subject,
+        message,
+        client.Client_Name,
+        `${client.Phone ? '📞 ' + client.Phone : ''} ${client.Email ? '✉ ' + client.Email : ''}`.trim() || 'No direct phone',
+        (liveText) => {
+          if (typeof openWhatsAppLink === 'function') openWhatsAppLink(client.Phone, liveText || message);
+        },
+        (liveSubj, liveText) => {
+          window.open(`mailto:${client.Email || ''}?subject=${encodeURIComponent(liveSubj || subject)}&body=${encodeURIComponent(liveText || message)}`, '_blank');
+        }
+      );
+    } else {
+      const commsModal = document.getElementById("comms-share-modal");
+      if (commsModal) commsModal.classList.add("show");
+    }
   }
 
   function exportClientsCSV() {
@@ -13845,26 +14045,23 @@ window.openNewClientModal = window.openClientModal;
           <thead>
             <tr>
               ${isAdmin ? `
-                <th style="width: 40px; text-align: center;">
+                <th style="width: 36px; text-align: center;">
                   <input type="checkbox" id="select-all-users" ${allFilteredSelected ? 'checked' : ''} onchange="toggleSelectAllUsers(this.checked)">
                 </th>
               ` : ''}
-              <th>Employee Profile</th>
-              <th>DOJ</th>
+              <th>Employee ID / Name</th>
+              <th style="text-align: center; width: 100px;">Profile Photo</th>
               <th>Role & Access</th>
-              <th>Department & Designation</th>
+              <th>Department</th>
               <th>Contact Info</th>
-              <th>Reporting Manager</th>
-              <th>Zone / Territory</th>
-              <th>CRUD Permissions</th>
-              <th>Status</th>
-              <th style="min-width: 140px; text-align: right;">Actions</th>
+              <th>Reports To</th>
+              <th style="min-width: 140px; text-align: right;">Action</th>
             </tr>
           </thead>
           <tbody>
             ${filteredUsers.length === 0 ? `
               <tr>
-                <td colspan="${isAdmin ? 11 : 10}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
+                <td colspan="${isAdmin ? 8 : 7}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
                   <i class="fas fa-user-slash fa-2x" style="margin-bottom: 10px; display: block; opacity: 0.4;"></i>
                   No employee records found matching your search and filter criteria.
                 </td>
@@ -13887,74 +14084,77 @@ window.openNewClientModal = window.openClientModal;
                     </td>
                   ` : ''}
                   
-                  <!-- Employee Photo + Name + ID -->
+                  <!-- 1. Employee ID / Name -->
                   <td>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                      <div style="width: 38px; height: 38px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.85rem; border: 1.5px solid var(--border-color); flex-shrink: 0; box-shadow: var(--shadow-sm);">
-                        ${u.Photo ? `
-                          <img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">
-                        ` : initials}
-                      </div>
-                      <div>
-                        <strong>${u.Full_Name}</strong> ${isSelf ? '<span style="font-size: 0.72rem; color: var(--primary); font-weight: 700;">(You)</span>' : ''}
-                        <div style="font-size: 0.725rem; color: var(--text-muted);">${u.User_ID}</div>
-                      </div>
+                    <div style="display: flex; align-items: baseline; gap: 6px;">
+                      <strong style="color: var(--text-main); font-size: 0.9rem;">${u.Full_Name}</strong>
+                      ${isSelf ? '<span class="badge badge-active" style="font-size: 0.65rem; padding: 1px 5px;">You</span>' : ''}
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+                      <span style="font-size: 0.75rem; font-family: monospace; color: var(--primary); font-weight: 600;">${u.User_ID}</span>
+                      <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${(u.Status || 'ACTIVE') === 'ACTIVE' ? 'var(--success)' : 'var(--danger)'};" title="Status: ${u.Status || 'ACTIVE'}"></span>
+                      <span style="font-size: 0.7rem; color: var(--text-muted);">${u.Status || 'ACTIVE'}</span>
                     </div>
                   </td>
 
-                  <!-- Date of Joining (DOJ) -->
-                  <td>
-                    <span style="font-size: 0.825rem; font-weight: 600;">${u.DOJ || '-'}</span>
+                  <!-- 2. Profile Photo -->
+                  <td style="text-align: center;">
+                    <div style="display: inline-flex; position: relative; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.85rem; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm); cursor: pointer;" onclick="openUserDetailsModal('${u.User_ID}')" title="Click to view ${u.Full_Name}'s profile">
+                      ${u.Photo ? `
+                        <img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">
+                      ` : `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">${initials}</div>`}
+                    </div>
                   </td>
 
-                  <!-- Role -->
+                  <!-- 3. Role & Access -->
                   <td>
-                    <span class="badge ${u.Role === 'ADMIN' ? 'badge-active' : (u.Role === 'MANAGER' ? 'badge-pending' : 'badge-on-hold')}" style="font-size: 0.7rem;">
-                      ${u.Role}
-                    </span>
-                  </td>
-
-                  <!-- Department & Designation -->
-                  <td>
-                    <div style="font-weight: 600; font-size: 0.85rem;">${u.Designation || '-'}</div>
-                    <div style="font-size: 0.725rem; color: var(--text-muted);">${u.Department || '-'}</div>
-                  </td>
-
-                  <!-- Contact Info -->
-                  <td>
-                    <div style="font-size: 0.825rem;"><i class="fas fa-phone" style="font-size: 0.7rem; color: var(--primary); margin-right: 4px;"></i>${u.Mobile || '-'}</div>
-                    ${u.Email ? `<div style="font-size: 0.725rem; color: var(--text-muted);"><i class="fas fa-envelope" style="font-size: 0.7rem; margin-right: 4px;"></i>${u.Email}</div>` : ''}
-                  </td>
-
-                  <!-- Reporting Manager -->
-                  <td>
-                    <span style="font-size: 0.825rem; font-weight: 500;">${u.Manager_Name || '-'}</span>
-                  </td>
-
-                  <!-- Territory Zone -->
-                  <td>
-                    <span class="badge badge-secondary" style="font-size: 0.7rem;">
-                      <i class="fas fa-map-marker-alt"></i> ${u.Territory_Zone || u.Branch_Area || 'General'}
-                    </span>
-                  </td>
-
-                  <!-- Granular CRUD Permissions Button -->
-                  <td>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Configure single-window granular CRUD rights" style="font-size: 0.725rem; padding: 3px 8px; display: inline-flex; align-items: center; gap: 5px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                      <span class="badge ${u.Role === 'ADMIN' ? 'badge-active' : (u.Role === 'MANAGER' ? 'badge-pending' : 'badge-on-hold')}" style="font-size: 0.72rem; font-weight: 700;">
+                        ${u.Role}
+                      </span>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Configure single-window granular CRUD rights" style="font-size: 0.725rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 5px; border-radius: 4px;">
                       <i class="fas fa-sliders-h" style="color: var(--primary);"></i>
-                      <strong>${modulesWithAccess}/${SYSTEM_FACILITIES.length}</strong> Modules
-                      <span class="badge badge-active" style="font-size: 0.62rem; padding: 1px 4px; margin-left: 2px;">CRUD</span>
+                      <span>${modulesWithAccess}/${SYSTEM_FACILITIES.length} Access</span>
+                      <span class="badge badge-active" style="font-size: 0.6rem; padding: 1px 4px;">CRUD</span>
                     </button>
                   </td>
 
-                  <!-- Status -->
+                  <!-- 4. Department -->
                   <td>
-                    <span class="badge ${u.Status === 'ACTIVE' ? 'badge-active' : (u.Status === 'ON_LEAVE' ? 'badge-pending' : 'badge-danger')}" style="font-size: 0.7rem;">
-                      ${u.Status || 'ACTIVE'}
-                    </span>
+                    <div style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">${u.Department || 'Operations'}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${u.Designation || '-'}</div>
                   </td>
 
-                  <!-- Aligned Uniform 32x32px Action Buttons -->
+                  <!-- 5. Contact Info (Phone + Email + Direct WhatsApp Button) -->
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 6px; font-size: 0.825rem;">
+                      <a href="tel:${u.Mobile || ''}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Call ${u.Full_Name}">
+                        <i class="fas fa-phone" style="font-size: 0.7rem; color: var(--primary);"></i>
+                        <span>${u.Mobile || '-'}</span>
+                      </a>
+                      ${u.Mobile ? `
+                        <button type="button" class="btn-circle btn-secondary" onclick="openWhatsAppLink('${u.Mobile}', 'Hello ${u.Full_Name.replace(/'/g, "\\'")},')" title="Chat with ${u.Full_Name} on WhatsApp" style="width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #25D366; border-radius: 50%; font-size: 0.72rem; border: 1px solid rgba(37, 211, 102, 0.4); cursor: pointer;">
+                          <i class="fab fa-whatsapp"></i>
+                        </button>
+                      ` : ''}
+                    </div>
+                    ${u.Email ? `
+                      <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 3px;">
+                        <a href="mailto:${u.Email}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Email ${u.Full_Name}">
+                          <i class="fas fa-envelope" style="font-size: 0.68rem; color: var(--text-muted);"></i>
+                          <span>${u.Email}</span>
+                        </a>
+                      </div>
+                    ` : ''}
+                  </td>
+
+                  <!-- 6. Reports To -->
+                  <td>
+                    <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-main);">${u.Manager_Name || '-'}</div>
+                  </td>
+
+                  <!-- 7. Action Button (Uniform 32x32px Square Buttons) -->
                   <td style="text-align: right; white-space: nowrap;">
                     <div style="display: inline-flex; align-items: center; gap: 6px;">
                       
@@ -13963,7 +14163,7 @@ window.openNewClientModal = window.openClientModal;
                         <i class="fas fa-eye"></i>
                       </button>
 
-                      <!-- 2. Edit User Modal (Fixing issue #4!) -->
+                      <!-- 2. Edit User Modal & CRUD -->
                       ${isAdmin ? `
                         <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.User_ID}')" title="Edit Employee Record & Granular CRUD" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--warning);">
                           <i class="fas fa-edit"></i>
@@ -14498,21 +14698,76 @@ window.openNewClientModal = window.openClientModal;
     showToast(`Loaded default CRUD rights for ${newRole}`, "info");
   };
 
-  window.handleUserPhotoSelect = function(input) {
-    if (!input.files || !input.files[0]) return;
-    const file = input.files[0];
+  // Fast Client-Side Image Resizer & Compressor (<30KB)
+  function compressImageFile(file, maxWidth, maxHeight, quality, callback) {
     const reader = new FileReader();
     reader.onload = function(e) {
-      window._tempSelectedPhoto = e.target.result;
+      const img = new Image();
+      img.onload = function() {
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality || 0.8);
+        callback(dataUrl);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function saveUserPhotoToStorage(userId, photo) {
+    try {
+      let photosMap = {};
+      const saved = localStorage.getItem("nexallot_user_photos");
+      if (saved) {
+        try { photosMap = JSON.parse(saved); } catch(e) {}
+      }
+      if (photo) {
+        photosMap[userId] = photo;
+      } else {
+        delete photosMap[userId];
+      }
+      localStorage.setItem("nexallot_user_photos", JSON.stringify(photosMap));
+    } catch(e) {
+      console.warn("Storage warning for user photo:", e);
+    }
+  }
+
+  function persistUsersToStorage() {
+    try {
+      localStorage.setItem("nexallot_users_cache", JSON.stringify(state.users || []));
+    } catch(e) {
+      console.warn("User cache persist warning:", e);
+    }
+  }
+
+  window.handleUserPhotoSelect = function(input) {
+    if (!input.files || !input.files[0]) return;
+    compressImageFile(input.files[0], 256, 256, 0.8, function(compressedUrl) {
+      window._tempSelectedPhoto = compressedUrl;
       const img = document.getElementById("u-photo-preview");
       const icon = document.getElementById("u-photo-placeholder");
       if (img) {
-        img.src = e.target.result;
+        img.src = compressedUrl;
         img.style.display = "block";
       }
       if (icon) icon.style.display = "none";
-    };
-    reader.readAsDataURL(file);
+    });
   };
 
   window.removeUserFormPhoto = function() {
@@ -14575,8 +14830,9 @@ window.openNewClientModal = window.openClientModal;
         u.Manager_Name = mgrName;
         u.Daily_Allowance_Rate = daRate;
         u.Permissions = perms;
-        if (photo !== undefined && (photo.startsWith('data:image') || photo === "")) {
+        if (photo !== undefined) {
           u.Photo = photo;
+          saveUserPhotoToStorage(editUserId, photo);
         }
 
         // If editing current logged-in user, update session profile and avatars
@@ -14587,9 +14843,12 @@ window.openNewClientModal = window.openClientModal;
           state.currentUser.Designation = desig;
           state.currentUser.Photo = u.Photo;
           state.currentUser.Permissions = perms;
+          localStorage.setItem("nexallot_current_user_photo", u.Photo || "");
+          localStorage.setItem("nexallot_session_user", JSON.stringify(state.currentUser));
           if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
         }
 
+        persistUsersToStorage();
         showToast(`Employee ${u.Full_Name} updated successfully!`, "success");
         if (typeof syncRecordToBackend === 'function') {
           syncRecordToBackend('save_user', u);
@@ -14617,6 +14876,10 @@ window.openNewClientModal = window.openClientModal;
       };
 
       state.users.push(newUser);
+      if (photo) {
+        saveUserPhotoToStorage(userId, photo);
+      }
+      persistUsersToStorage();
       showToast(`New employee ${name} added successfully!`, "success");
       if (typeof syncRecordToBackend === 'function') {
         syncRecordToBackend('save_user', newUser);
@@ -14912,19 +15175,16 @@ window.openNewClientModal = window.openClientModal;
 
   window.handleCurrentProfilePhotoSelect = function(input) {
     if (!input.files || !input.files[0]) return;
-    const file = input.files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      window._tempCurPhoto = e.target.result;
+    compressImageFile(input.files[0], 256, 256, 0.8, function(compressedUrl) {
+      window._tempCurPhoto = compressedUrl;
       const img = document.getElementById("cur-photo-preview");
       const icon = document.getElementById("cur-photo-placeholder");
       if (img) {
-        img.src = e.target.result;
+        img.src = compressedUrl;
         img.style.display = "block";
       }
       if (icon) icon.style.display = "none";
-    };
-    reader.readAsDataURL(file);
+    });
   };
 
   window.removeCurrentProfilePhoto = function() {
@@ -14945,6 +15205,10 @@ window.openNewClientModal = window.openClientModal;
     const photo = (img && img.src && img.src.startsWith('data:image')) ? img.src : (window._tempCurPhoto || "");
 
     cur.Photo = photo;
+    saveUserPhotoToStorage(cur.User_ID, photo);
+    localStorage.setItem("nexallot_current_user_photo", photo || "");
+    localStorage.setItem("nexallot_session_user", JSON.stringify(cur));
+
     const matching = (state.users || []).find(u => u.User_ID === cur.User_ID);
     if (matching) {
       matching.Photo = photo;
@@ -14952,6 +15216,7 @@ window.openNewClientModal = window.openClientModal;
         syncRecordToBackend('save_user', matching);
       }
     }
+    persistUsersToStorage();
 
     if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
     closeModal();
@@ -14967,6 +15232,7 @@ window.openNewClientModal = window.openClientModal;
     if (!u) return;
     const newStatus = u.Status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
     u.Status = newStatus;
+    persistUsersToStorage();
     showToast(`Employee ${u.Full_Name} marked as ${newStatus}.`, "info");
     if (typeof syncRecordToBackend === 'function') {
       syncRecordToBackend('save_user', u);
@@ -14980,6 +15246,8 @@ window.openNewClientModal = window.openClientModal;
     if (!confirm(`Are you sure you want to delete employee record for ${u.Full_Name} (${u.User_ID})?`)) return;
 
     state.users = (state.users || []).filter(x => x.User_ID !== userId);
+    saveUserPhotoToStorage(userId, "");
+    persistUsersToStorage();
     showToast(`Employee ${u.Full_Name} removed from system.`, "success");
     renderUsers();
   };
