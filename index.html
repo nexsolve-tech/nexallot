@@ -12135,35 +12135,1343 @@ window.openNewClientModal = window.openClientModal;
 </script>
   <script>
 (function() {
-    function renderReports(container) {
+  /**
+   * =========================================================================
+   * NEXALLOT ENTERPRISE REPORTING & RBAC EXPORT CONTROL SYSTEM
+   * Multi-dimensional Business Intelligence, Live Table Viewer & Secure CSV
+   * =========================================================================
+   */
+
+  // 1. RBAC & USER PERMISSIONS STORE FOR REPORT DOWNLOADS
+  const DEFAULT_EXPORT_PERMISSIONS = {
+    roleDefaults: {
+      ADMIN: true,
+      MANAGER: true,
+      ACCOUNTS: true,
+      EXECUTIVE: false // Default: Field Executives restricted from CSV export
+    },
+    userOverrides: {} // { "USR-102": true / false }
+  };
+
+  function getReportExportPermissions() {
+    if (!state.reportExportPermissions) {
+      try {
+        const saved = localStorage.getItem("nexallot_report_export_perms");
+        state.reportExportPermissions = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(DEFAULT_EXPORT_PERMISSIONS));
+      } catch(e) {
+        state.reportExportPermissions = JSON.parse(JSON.stringify(DEFAULT_EXPORT_PERMISSIONS));
+      }
+    }
+    return state.reportExportPermissions;
+  }
+
+  function saveReportExportPermissions(perms) {
+    state.reportExportPermissions = perms;
+    try {
+      localStorage.setItem("nexallot_report_export_perms", JSON.stringify(perms));
+    } catch(e) {}
+  }
+
+  function canUserDownloadReports(user) {
+    if (!user) user = state.currentUser || { Role: "EXECUTIVE", User_ID: "USR-102" };
+    // Admins always have download authorization
+    if (user.Role === "ADMIN") return true;
+
+    const perms = getReportExportPermissions();
+    // 1. Check direct user override (CRUD Level 1)
+    if (perms.userOverrides && perms.userOverrides[user.User_ID] !== undefined) {
+      return Boolean(perms.userOverrides[user.User_ID]);
+    }
+    // 2. Check inherited role default (CRUD Level 2)
+    if (perms.roleDefaults && perms.roleDefaults[user.Role] !== undefined) {
+      return Boolean(perms.roleDefaults[user.Role]);
+    }
+    return false;
+  }
+  window.canUserDownloadReports = canUserDownloadReports;
+
+  // Active Report Navigation & Filter State
+  window.activeReportId = window.activeReportId || null;
+  window.activeReportCategory = window.activeReportCategory || "ALL";
+  window.reportDatePreset = window.reportDatePreset || "ALL";
+  window.reportFilters = window.reportFilters || {
+    fromDate: "",
+    toDate: "",
+    employeeId: "",
+    query: ""
+  };
+
+  /**
+   * =========================================================================
+   * 2. EXHAUSTIVE REPOSITORY OF 10 ENTERPRISE REPORTS
+   * =========================================================================
+   */
+  const ALL_REPORTS = [
+    {
+      id: "VISITS_GPS",
+      name: "Field Visits & GPS Attendance Report",
+      category: "Field Operations",
+      categoryKey: "VISITS",
+      icon: "fas fa-map-marked-alt",
+      color: "#0f766e",
+      badgeClass: "badge-active",
+      desc: "Complete field attendance, GPS check-in/out stamps, duration, client meetings, purpose, and visit outcomes.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.visits || [], "User_ID") : (state.visits || []),
+      getDate: (r) => r.Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Visit_ID", label: "Visit ID", format: "bold" },
+        { key: "Date", label: "Date", format: "text" },
+        { key: "User_Name", label: "Field Executive", format: "text", getVal: (r) => getUserName(r.User_ID) },
+        { key: "Client_Name", label: "Client Account", format: "bold", getVal: (r) => getClientName(r.Client_ID) },
+        { key: "Purpose", label: "Visit Purpose", format: "text" },
+        { key: "Check_In_Time", label: "Check-In", format: "text" },
+        { key: "Check_Out_Time", label: "Check-Out", format: "text" },
+        { key: "Time_Spent_Mins", label: "Duration", format: "mins" },
+        { key: "Check_In_GPS", label: "GPS Coordinates", format: "code" },
+        { key: "Outcome_Status", label: "Status", format: "badge" },
+        { key: "Notes", label: "Minutes / Outcome", format: "text" }
+      ],
+      getKPIs: (rows) => [
+        { label: "Total Visits", val: rows.length, icon: "fas fa-map-pin", color: "#0f766e" },
+        { label: "Completed", val: rows.filter(r => r.Check_Out_Time).length, icon: "fas fa-check-circle", color: "#10b981" },
+        { label: "Total Time Logged", val: Math.round(rows.reduce((s, r) => s + (Number(r.Time_Spent_Mins) || 0), 0) / 60) + " hrs", icon: "fas fa-clock", color: "#0284c7" },
+        { label: "GPS Verified", val: rows.filter(r => r.Check_In_GPS && r.Check_In_GPS.includes(',')).length, icon: "fas fa-satellite", color: "#8b5cf6" }
+      ]
+    },
+
+    {
+      id: "ORDERS_REVENUE",
+      name: "Sales Orders & Revenue Booking Report",
+      category: "Sales & Revenue",
+      categoryKey: "SALES",
+      icon: "fas fa-shopping-cart",
+      color: "#0284c7",
+      badgeClass: "badge-active",
+      desc: "All client sales orders with tax breakdowns (CGST, SGST, IGST), taxable value, net invoice sums, and delivery stage.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.orders || [], "User_ID") : (state.orders || []),
+      getDate: (r) => r.Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Order_ID", label: "Order ID", format: "bold" },
+        { key: "Date", label: "Date", format: "text" },
+        { key: "User_Name", label: "Booked By", format: "text", getVal: (r) => getUserName(r.User_ID) },
+        { key: "Client_Name", label: "Client Account", format: "bold", getVal: (r) => getClientName(r.Client_ID) },
+        { key: "Items_Count", label: "Items", format: "text", getVal: (r) => (r.Items || []).length + " SKU(s)" },
+        { key: "Taxable_Value", label: "Taxable Value (₹)", format: "currency", getVal: (r) => r.Taxable_Amount || (Number(r.Total_Amount || 0) * 0.84) },
+        { key: "CGST", label: "CGST (₹)", format: "currency", getVal: (r) => r.CGST_Amount || 0 },
+        { key: "SGST", label: "SGST (₹)", format: "currency", getVal: (r) => r.SGST_Amount || 0 },
+        { key: "IGST", label: "IGST (₹)", format: "currency", getVal: (r) => r.IGST_Amount || 0 },
+        { key: "Total_Amount", label: "Net Total (₹)", format: "currency_bold" },
+        { key: "Payment_Terms", label: "Terms", format: "text" },
+        { key: "Status", label: "Delivery Status", format: "badge" }
+      ],
+      getKPIs: (rows) => {
+        const total = rows.reduce((s, r) => s + (Number(r.Total_Amount) || 0), 0);
+        const delivered = rows.filter(r => r.Status === "DELIVERED").length;
+        const totalTax = rows.reduce((s, r) => s + (Number(r.CGST_Amount || 0) + Number(r.SGST_Amount || 0) + Number(r.IGST_Amount || 0)), 0);
+        return [
+          { label: "Total Orders", val: rows.length, icon: "fas fa-receipt", color: "#0284c7" },
+          { label: "Gross Revenue", val: "₹" + total.toLocaleString(), icon: "fas fa-chart-line", color: "#0f766e" },
+          { label: "Total Tax (GST)", val: "₹" + Math.round(totalTax).toLocaleString(), icon: "fas fa-balance-scale", color: "#f59e0b" },
+          { label: "Delivered", val: delivered + " / " + rows.length, icon: "fas fa-truck", color: "#10b981" }
+        ];
+      }
+    },
+
+    {
+      id: "LINE_ITEMS_SALES",
+      name: "Product-wise Sales & Line Items Report",
+      category: "Sales & Revenue",
+      categoryKey: "SALES",
+      icon: "fas fa-tags",
+      color: "#8b5cf6",
+      badgeClass: "badge-active",
+      desc: "Granular product-level analysis itemizing SKUs, quantities sold, unit rates, tax rates, and line revenue totals.",
+      getRawData: () => {
+        const orders = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.orders || [], "User_ID") : (state.orders || []);
+        const flattened = [];
+        orders.forEach(o => {
+          (o.Items || []).forEach(it => {
+            flattened.push({
+              Order_ID: o.Order_ID,
+              Date: o.Date,
+              User_ID: o.User_ID,
+              Client_ID: o.Client_ID,
+              SKU: it.sku || it.SKU || "-",
+              Product_Name: it.name || it.Product_Name || "-",
+              Quantity: it.qty || it.Quantity || 1,
+              Unit_Price: it.price || it.Unit_Price || 0,
+              Tax_Rate: (it.taxRate !== undefined ? it.taxRate : 18) + "%",
+              Line_Total: (Number(it.qty || 1) * Number(it.price || 0))
+            });
+          });
+        });
+        return flattened;
+      },
+      getDate: (r) => r.Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Order_ID", label: "Order ID", format: "bold" },
+        { key: "Date", label: "Date", format: "text" },
+        { key: "User_Name", label: "Sales Rep", format: "text", getVal: (r) => getUserName(r.User_ID) },
+        { key: "Client_Name", label: "Client", format: "text", getVal: (r) => getClientName(r.Client_ID) },
+        { key: "SKU", label: "SKU", format: "code" },
+        { key: "Product_Name", label: "Product Title", format: "bold" },
+        { key: "Quantity", label: "Qty Sold", format: "text" },
+        { key: "Unit_Price", label: "Unit Rate (₹)", format: "currency" },
+        { key: "Tax_Rate", label: "GST %", format: "text" },
+        { key: "Line_Total", label: "Line Total (₹)", format: "currency_bold" }
+      ],
+      getKPIs: (rows) => {
+        const totalQty = rows.reduce((s, r) => s + (Number(r.Quantity) || 0), 0);
+        const totalVal = rows.reduce((s, r) => s + (Number(r.Line_Total) || 0), 0);
+        const uniqueSkus = new Set(rows.map(r => r.SKU)).size;
+        return [
+          { label: "Items Sold", val: totalQty.toLocaleString() + " units", icon: "fas fa-cubes", color: "#8b5cf6" },
+          { label: "Total Line Value", val: "₹" + totalVal.toLocaleString(), icon: "fas fa-coins", color: "#0f766e" },
+          { label: "Unique SKUs Sold", val: uniqueSkus, icon: "fas fa-barcode", color: "#0284c7" },
+          { label: "Avg Item Price", val: rows.length ? "₹" + Math.round(totalVal / (totalQty || 1)).toLocaleString() : "₹0", icon: "fas fa-tag", color: "#10b981" }
+        ];
+      }
+    },
+
+    {
+      id: "INVENTORY_VALUATION",
+      name: "Live Inventory & Stock Valuation Report",
+      category: "Inventory & Assets",
+      categoryKey: "INVENTORY",
+      icon: "fas fa-boxes",
+      color: "#d97706",
+      badgeClass: "badge-active",
+      desc: "Warehouse stock on hand, UOM, reorder thresholds, inventory valuation, and active stock alert status.",
+      getRawData: () => state.inventory || [],
+      getDate: () => "",
+      getUser: () => "",
+      columns: [
+        { key: "SKU", label: "SKU Code", format: "bold" },
+        { key: "Product_Name", label: "Product Title", format: "bold" },
+        { key: "Category", label: "Category", format: "text" },
+        { key: "Warehouse_Location", label: "Location", format: "text" },
+        { key: "Stock_Qty", label: "Current Stock", format: "text", getVal: (r) => (r.Stock_Qty || r.Current_Stock || 0) + " " + (r.UOM || 'Pcs') },
+        { key: "Reorder_Level", label: "Reorder Level", format: "text", getVal: (r) => (r.Reorder_Level || 10) + " " + (r.UOM || 'Pcs') },
+        { key: "Unit_Price", label: "Unit Rate (₹)", format: "currency", getVal: (r) => r.Unit_Price || r.Price || 0 },
+        { key: "Valuation", label: "Valuation (₹)", format: "currency_bold", getVal: (r) => (Number(r.Stock_Qty || r.Current_Stock || 0) * Number(r.Unit_Price || r.Price || 0)) },
+        { key: "Status", label: "Stock Status", format: "badge", getVal: (r) => Number(r.Stock_Qty || r.Current_Stock || 0) <= Number(r.Reorder_Level || 10) ? "LOW STOCK" : "ADEQUATE" }
+      ],
+      getKPIs: (rows) => {
+        const totalUnits = rows.reduce((s, r) => s + Number(r.Stock_Qty || r.Current_Stock || 0), 0);
+        const totalVal = rows.reduce((s, r) => s + (Number(r.Stock_Qty || r.Current_Stock || 0) * Number(r.Unit_Price || r.Price || 0)), 0);
+        const lowStock = rows.filter(r => Number(r.Stock_Qty || r.Current_Stock || 0) <= Number(r.Reorder_Level || 10)).length;
+        return [
+          { label: "Total SKUs", val: rows.length, icon: "fas fa-boxes", color: "#d97706" },
+          { label: "Total Units", val: totalUnits.toLocaleString(), icon: "fas fa-layer-group", color: "#0284c7" },
+          { label: "Inventory Valuation", val: "₹" + totalVal.toLocaleString(), icon: "fas fa-wallet", color: "#0f766e" },
+          { label: "Low Stock Alerts", val: lowStock, icon: "fas fa-exclamation-triangle", color: lowStock > 0 ? "#ef4444" : "#10b981" }
+        ];
+      }
+    },
+
+    {
+      id: "PAYMENTS_COLLECTIONS",
+      name: "Payment Collections & Cash Flow Ledger",
+      category: "Finance & Tax",
+      categoryKey: "FINANCE",
+      icon: "fas fa-wallet",
+      color: "#10b981",
+      badgeClass: "badge-active",
+      desc: "Field and digital payment receipts, collection mode (Cash, Cheque, UPI, NEFT), bank UTR reference, and settlement.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.payments || [], "User_ID") : (state.payments || []),
+      getDate: (r) => r.Date || r.Payment_Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Receipt_ID", label: "Receipt / Txn ID", format: "bold", getVal: (r) => r.Payment_ID || r.Receipt_ID || r.Txn_ID },
+        { key: "Date", label: "Collection Date", format: "text", getVal: (r) => r.Date || r.Payment_Date },
+        { key: "User_Name", label: "Collected By", format: "text", getVal: (r) => getUserName(r.User_ID) },
+        { key: "Client_Name", label: "Client Account", format: "bold", getVal: (r) => getClientName(r.Client_ID) },
+        { key: "Payment_Mode", label: "Payment Mode", format: "badge" },
+        { key: "Reference_No", label: "UTR / Cheque Ref", format: "code", getVal: (r) => r.Reference_No || r.Cheque_No || r.UTR_No || "-" },
+        { key: "Amount", label: "Amount Collected (₹)", format: "currency_bold" },
+        { key: "Status", label: "Deposit Status", format: "badge", getVal: (r) => r.Status || "VERIFIED" },
+        { key: "Remarks", label: "Accounts Notes", format: "text", getVal: (r) => r.Remarks || "-" }
+      ],
+      getKPIs: (rows) => {
+        const total = rows.reduce((s, r) => s + (Number(r.Amount) || 0), 0);
+        const upi = rows.filter(r => (r.Payment_Mode || '').includes('UPI') || (r.Payment_Mode || '').includes('NEFT') || (r.Payment_Mode || '').includes('Bank')).reduce((s, r) => s + Number(r.Amount || 0), 0);
+        return [
+          { label: "Total Receipts", val: rows.length, icon: "fas fa-file-invoice", color: "#10b981" },
+          { label: "Total Realized (₹)", val: "₹" + total.toLocaleString(), icon: "fas fa-money-bill-wave", color: "#0f766e" },
+          { label: "Digital Collections", val: "₹" + upi.toLocaleString(), icon: "fas fa-mobile-alt", color: "#0284c7" },
+          { label: "Avg Receipt Size", val: rows.length ? "₹" + Math.round(total / rows.length).toLocaleString() : "₹0", icon: "fas fa-calculator", color: "#8b5cf6" }
+        ];
+      }
+    },
+
+    {
+      id: "CLIENT_OUTSTANDING",
+      name: "Client Directory & Outstanding Balances Report",
+      category: "Finance & Tax",
+      categoryKey: "FINANCE",
+      icon: "fas fa-building",
+      color: "#4f46e5",
+      badgeClass: "badge-active",
+      desc: "Customer account directory, credit limits, current outstanding dues, credit terms, and exposure risk status.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.clients || [], "Assigned_User_ID") : (state.clients || []),
+      getDate: () => "",
+      getUser: (r) => r.Assigned_User_ID,
+      columns: [
+        { key: "Client_ID", label: "Account ID", format: "bold" },
+        { key: "Client_Name", label: "Company Name", format: "bold" },
+        { key: "Account_Type", label: "Customer Type", format: "text" },
+        { key: "City_Area", label: "Zone / Area", format: "text" },
+        { key: "Phone", label: "Contact Phone", format: "text" },
+        { key: "GSTIN", label: "GSTIN", format: "code" },
+        { key: "Credit_Limit", label: "Credit Limit (₹)", format: "currency", getVal: (r) => r.Credit_Limit || 0 },
+        { key: "Outstanding_Balance", label: "Outstanding Dues (₹)", format: "currency_bold", getVal: (r) => r.Outstanding_Balance || 0 },
+        { key: "Payment_Terms", label: "Credit Terms", format: "text" },
+        { key: "Assigned_User", label: "Assigned Rep", format: "text", getVal: (r) => getUserName(r.Assigned_User_ID) },
+        { key: "Status", label: "Account Status", format: "badge" }
+      ],
+      getKPIs: (rows) => {
+        const totalDue = rows.reduce((s, r) => s + (Number(r.Outstanding_Balance) || 0), 0);
+        const totalCredit = rows.reduce((s, r) => s + (Number(r.Credit_Limit) || 0), 0);
+        const withBalance = rows.filter(r => Number(r.Outstanding_Balance) > 0).length;
+        return [
+          { label: "Total Accounts", val: rows.length, icon: "fas fa-users", color: "#4f46e5" },
+          { label: "Total Outstanding", val: "₹" + totalDue.toLocaleString(), icon: "fas fa-hand-holding-usd", color: "#ef4444" },
+          { label: "Total Credit Extended", val: "₹" + totalCredit.toLocaleString(), icon: "fas fa-credit-card", color: "#0284c7" },
+          { label: "Clients with Dues", val: withBalance + " / " + rows.length, icon: "fas fa-exclamation-circle", color: "#f59e0b" }
+        ];
+      }
+    },
+
+    {
+      id: "EXPENSE_REIMBURSEMENTS",
+      name: "Expense Claims & Reimbursement Audit Report",
+      category: "Finance & Tax",
+      categoryKey: "FINANCE",
+      icon: "fas fa-receipt",
+      color: "#e11d48",
+      badgeClass: "badge-active",
+      desc: "Employee travel, conveyance, and daily allowances, linked site visit IDs, approval hierarchy, and accounts payout records.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.expenses || [], "User_ID") : (state.expenses || []),
+      getDate: (r) => r.Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Claim_ID", label: "Claim ID", format: "bold" },
+        { key: "Date", label: "Claim Date", format: "text" },
+        { key: "User_Name", label: "Employee", format: "bold", getVal: (r) => getUserName(r.User_ID) },
+        { key: "Title", label: "Purpose / Claim Title", format: "text" },
+        { key: "Linked_Visit", label: "Nature / Linked Visit", format: "text", getVal: (r) => r.Linked_Visit_ID ? ("Visit: " + r.Linked_Visit_ID) : "Direct Claim" },
+        { key: "Items_Count", label: "Items", format: "text", getVal: (r) => (r.Line_Items || []).length + " Line(s)" },
+        { key: "Total_Amount", label: "Claim Amount (₹)", format: "currency_bold" },
+        { key: "Approval_Status", label: "Approval Stage", format: "badge", getVal: (r) => r.Overall_Approval_Status || r.Manager_Status || "PENDING" },
+        { key: "Accounts_Status", label: "Payout Status", format: "badge", getVal: (r) => r.Accounts_Status || "PENDING" },
+        { key: "Accounts_UTR", label: "Disbursement Ref", format: "code", getVal: (r) => r.Accounts_UTR_Ref || "-" }
+      ],
+      getKPIs: (rows) => {
+        const total = rows.reduce((s, r) => s + (Number(r.Total_Amount) || 0), 0);
+        const settled = rows.filter(r => r.Accounts_Status === "SETTLED").reduce((s, r) => s + (Number(r.Total_Amount) || 0), 0);
+        const pending = rows.filter(r => (r.Overall_Approval_Status || r.Manager_Status || '').includes('PENDING')).length;
+        return [
+          { label: "Total Claims", val: rows.length, icon: "fas fa-receipt", color: "#e11d48" },
+          { label: "Total Incurred (₹)", val: "₹" + total.toLocaleString(), icon: "fas fa-wallet", color: "#0f766e" },
+          { label: "Settled / Paid (₹)", val: "₹" + settled.toLocaleString(), icon: "fas fa-check-double", color: "#10b981" },
+          { label: "Pending Sign-off", val: pending, icon: "fas fa-user-clock", color: pending > 0 ? "#f59e0b" : "#10b981" }
+        ];
+      }
+    },
+
+    {
+      id: "SERVICE_COMPLAINTS",
+      name: "Customer Service Requests & Complaint SLA Report",
+      category: "Service & Support",
+      categoryKey: "SERVICE",
+      icon: "fas fa-tools",
+      color: "#ea580c",
+      badgeClass: "badge-active",
+      desc: "Client service requests, breakdown tickets, technician assignments, resolution status, and SLA delivery tracking.",
+      getRawData: () => typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.complaints || [], "Logged_By_User_ID") : (state.complaints || []),
+      getDate: (r) => r.Date || r.Logged_Date,
+      getUser: (r) => r.Logged_By_User_ID,
+      columns: [
+        { key: "Complaint_ID", label: "Ticket ID", format: "bold" },
+        { key: "Date", label: "Logged Date", format: "text", getVal: (r) => r.Date || r.Logged_Date },
+        { key: "Client_Name", label: "Client Account", format: "bold", getVal: (r) => getClientName(r.Client_ID) },
+        { key: "Type", label: "Ticket Type", format: "badge", getVal: (r) => r.Type || "Complaint" },
+        { key: "Category", label: "Category", format: "text" },
+        { key: "Priority", label: "Priority", format: "badge" },
+        { key: "Assigned_To", label: "Assigned Tech", format: "text", getVal: (r) => getUserName(r.Assigned_To_User_ID) || "Unassigned" },
+        { key: "Stage", label: "Current Stage", format: "badge", getVal: (r) => r.Stage || r.Status || "REGISTERED" },
+        { key: "Target_SLA", label: "SLA Target", format: "text", getVal: (r) => (r.Target_SLA_Days || 2) + " Days" },
+        { key: "Description", label: "Issue Summary", format: "text" }
+      ],
+      getKPIs: (rows) => {
+        const resolved = rows.filter(r => (r.Stage || r.Status) === "COMPLETED" || (r.Stage || r.Status) === "RESOLVED").length;
+        const critical = rows.filter(r => r.Priority === "CRITICAL" || r.Priority === "HIGH").length;
+        return [
+          { label: "Total Tickets", val: rows.length, icon: "fas fa-ticket-alt", color: "#ea580c" },
+          { label: "Resolved", val: resolved + " / " + rows.length, icon: "fas fa-check-circle", color: "#10b981" },
+          { label: "Resolution Rate", val: rows.length ? Math.round((resolved / rows.length) * 100) + "%" : "100%", icon: "fas fa-percent", color: "#0f766e" },
+          { label: "High / Critical", val: critical, icon: "fas fa-fire", color: critical > 0 ? "#ef4444" : "#10b981" }
+        ];
+      }
+    },
+
+    {
+      id: "EXECUTIVE_SCORECARD",
+      name: "Sales Executive Performance & Activity Scorecard",
+      category: "Sales & Revenue",
+      categoryKey: "SALES",
+      icon: "fas fa-user-check",
+      color: "#0f766e",
+      badgeClass: "badge-active",
+      desc: "Comprehensive executive productivity comparing field visits logged, hours deployed, orders booked, and payment collections.",
+      getRawData: () => {
+        const users = (state.users || []).filter(u => u.Role === "EXECUTIVE" || u.Role === "MANAGER");
+        const orders = state.orders || [];
+        const visits = state.visits || [];
+        const payments = state.payments || [];
+        const expenses = state.expenses || [];
+
+        return users.map(u => {
+          const uVisits = visits.filter(v => v.User_ID === u.User_ID);
+          const uOrders = orders.filter(o => o.User_ID === u.User_ID);
+          const uPayments = payments.filter(p => p.User_ID === u.User_ID);
+          const uExpenses = expenses.filter(e => e.User_ID === u.User_ID);
+
+          const totalHours = Math.round(uVisits.reduce((s, v) => s + (Number(v.Time_Spent_Mins) || 0), 0) / 60);
+          const totalSales = uOrders.reduce((s, o) => s + (Number(o.Total_Amount) || 0), 0);
+          const totalCol = uPayments.reduce((s, p) => s + (Number(p.Amount) || 0), 0);
+          const totalExp = uExpenses.reduce((s, e) => s + (Number(e.Total_Amount) || 0), 0);
+
+          return {
+            User_ID: u.User_ID,
+            Full_Name: u.Full_Name,
+            Role: u.Role,
+            Department: u.Department,
+            Designation: u.Designation,
+            Manager_Name: u.Manager_Name || "-",
+            Total_Visits: uVisits.length,
+            Completed_Visits: uVisits.filter(v => v.Check_Out_Time).length,
+            Field_Hours: totalHours + " hrs",
+            Orders_Count: uOrders.length,
+            Sales_Value: totalSales,
+            Collections_Value: totalCol,
+            Expenses_Value: totalExp
+          };
+        });
+      },
+      getDate: () => "",
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "User_ID", label: "User ID", format: "bold" },
+        { key: "Full_Name", label: "Representative", format: "bold" },
+        { key: "Designation", label: "Designation", format: "text" },
+        { key: "Total_Visits", label: "Visits Logged", format: "text" },
+        { key: "Field_Hours", label: "Field Hours", format: "text" },
+        { key: "Orders_Count", label: "Orders Booked", format: "text" },
+        { key: "Sales_Value", label: "Total Bookings (₹)", format: "currency_bold" },
+        { key: "Collections_Value", label: "Collections (₹)", format: "currency" },
+        { key: "Expenses_Value", label: "Expenses Claimed (₹)", format: "currency" }
+      ],
+      getKPIs: (rows) => {
+        const totalSales = rows.reduce((s, r) => s + (Number(r.Sales_Value) || 0), 0);
+        const totalVisits = rows.reduce((s, r) => s + (Number(r.Total_Visits) || 0), 0);
+        const totalCol = rows.reduce((s, r) => s + (Number(r.Collections_Value) || 0), 0);
+        return [
+          { label: "Active Field Reps", val: rows.length, icon: "fas fa-user-tie", color: "#0f766e" },
+          { label: "Total Sales Generated", val: "₹" + totalSales.toLocaleString(), icon: "fas fa-chart-line", color: "#0284c7" },
+          { label: "Cumulative Visits", val: totalVisits, icon: "fas fa-map-marked-alt", color: "#10b981" },
+          { label: "Collections Realized", val: "₹" + totalCol.toLocaleString(), icon: "fas fa-wallet", color: "#f59e0b" }
+        ];
+      }
+    },
+
+    {
+      id: "GST_TAX_REGISTER",
+      name: "GST Tax Register & Statutory Breakdown Report",
+      category: "Finance & Tax",
+      categoryKey: "FINANCE",
+      icon: "fas fa-file-invoice-dollar",
+      color: "#2563eb",
+      badgeClass: "badge-active",
+      desc: "Statutory tax register categorizing intra-state (CGST + SGST) vs inter-state (IGST), customer GSTIN, and taxable turnover.",
+      getRawData: () => {
+        const orders = typeof getRoleScopedRecords === 'function' ? getRoleScopedRecords(state.orders || [], "User_ID") : (state.orders || []);
+        const compTax = typeof getCompanyTaxDetails === 'function' ? getCompanyTaxDetails() : { compStateName: "Rajasthan" };
+        const sellerState = compTax.compStateName || "Rajasthan";
+
+        return orders.map(o => {
+          const client = getClient(o.Client_ID);
+          const clientState = o.Client_State || (client ? client.State_Name : "") || sellerState;
+          const isIntra = clientState.toLowerCase().trim() === sellerState.toLowerCase().trim();
+          const net = Number(o.Total_Amount) || 0;
+          const taxable = o.Taxable_Amount || Math.round(net / 1.18);
+          const cgst = o.CGST_Amount || (isIntra ? Math.round((net - taxable) / 2) : 0);
+          const sgst = o.SGST_Amount || (isIntra ? Math.round((net - taxable) / 2) : 0);
+          const igst = o.IGST_Amount || (!isIntra ? (net - taxable) : 0);
+
+          return {
+            Order_ID: o.Order_ID,
+            Date: o.Date,
+            Client_ID: o.Client_ID,
+            User_ID: o.User_ID,
+            Client_Name: getClientName(o.Client_ID),
+            Client_GSTIN: client ? (client.GSTIN || "UNREGISTERED") : "UNREGISTERED",
+            Seller_State: sellerState,
+            Place_Of_Supply: clientState,
+            Supply_Type: isIntra ? "INTRA-STATE (CGST + SGST)" : "INTER-STATE (IGST)",
+            Taxable_Amount: taxable,
+            CGST_Amount: cgst,
+            SGST_Amount: sgst,
+            IGST_Amount: igst,
+            Total_Tax: cgst + sgst + igst,
+            Invoice_Total: net
+          };
+        });
+      },
+      getDate: (r) => r.Date,
+      getUser: (r) => r.User_ID,
+      columns: [
+        { key: "Order_ID", label: "Invoice / Order", format: "bold" },
+        { key: "Date", label: "Date", format: "text" },
+        { key: "Client_Name", label: "Customer Account", format: "bold" },
+        { key: "Client_GSTIN", label: "Customer GSTIN", format: "code" },
+        { key: "Place_Of_Supply", label: "Place of Supply", format: "text" },
+        { key: "Supply_Type", label: "Supply Nature", format: "badge" },
+        { key: "Taxable_Amount", label: "Taxable Value (₹)", format: "currency" },
+        { key: "CGST_Amount", label: "CGST (₹)", format: "currency" },
+        { key: "SGST_Amount", label: "SGST (₹)", format: "currency" },
+        { key: "IGST_Amount", label: "IGST (₹)", format: "currency" },
+        { key: "Total_Tax", label: "Total GST (₹)", format: "currency_bold" },
+        { key: "Invoice_Total", label: "Invoice Gross (₹)", format: "currency_bold" }
+      ],
+      getKPIs: (rows) => {
+        const taxable = rows.reduce((s, r) => s + Number(r.Taxable_Amount || 0), 0);
+        const cgst = rows.reduce((s, r) => s + Number(r.CGST_Amount || 0), 0);
+        const sgst = rows.reduce((s, r) => s + Number(r.SGST_Amount || 0), 0);
+        const igst = rows.reduce((s, r) => s + Number(r.IGST_Amount || 0), 0);
+        const totalTax = cgst + sgst + igst;
+        return [
+          { label: "Taxable Turnover", val: "₹" + taxable.toLocaleString(), icon: "fas fa-calculator", color: "#2563eb" },
+          { label: "Total CGST + SGST", val: "₹" + (cgst + sgst).toLocaleString(), icon: "fas fa-landmark", color: "#0f766e" },
+          { label: "Total IGST", val: "₹" + igst.toLocaleString(), icon: "fas fa-globe", color: "#8b5cf6" },
+          { label: "Total Tax Liability", val: "₹" + totalTax.toLocaleString(), icon: "fas fa-balance-scale", color: "#d97706" }
+        ];
+      }
+    }
+  ];
+
+  /**
+   * =========================================================================
+   * 3. MAIN RENDER FUNCTION: ANALYTICS & REPORTS HUB
+   * =========================================================================
+   */
+  function renderReports(container) {
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
+
+    const currentUser = state.currentUser || { Role: "ADMIN", User_ID: "USR-100", Full_Name: "Vikram Shah" };
+    const isAdmin = currentUser.Role === "ADMIN";
+    const hasDownloadRights = canUserDownloadReports(currentUser);
+
+    // If an individual report is selected, render the Active Report View
+    if (window.activeReportId) {
+      renderActiveReportView(container, window.activeReportId, hasDownloadRights, isAdmin);
+      return;
+    }
+
+    // Otherwise render the Catalog Grid of All 10 Reports
+    const categories = [
+      { key: "ALL", label: "All Reports (" + ALL_REPORTS.length + ")" },
+      { key: "SALES", label: "Sales & Revenue" },
+      { key: "VISITS", label: "Field Operations" },
+      { key: "FINANCE", label: "Finance & Tax" },
+      { key: "INVENTORY", label: "Inventory & Assets" },
+      { key: "SERVICE", label: "Service & Support" }
+    ];
+
+    const currentCat = window.activeReportCategory || "ALL";
+    const filteredReports = ALL_REPORTS.filter(r => currentCat === "ALL" || r.categoryKey === currentCat);
+
     container.innerHTML = `
-      <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem;">
-        <button class="btn btn-secondary" onclick="showToast('Exporting to Excel/CSV...')"><i class="fas fa-download"></i> Export Reports</button>
+      <!-- Top Action & Security Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-chart-pie" style="color: var(--primary);"></i> Analytics & Reports Catalog
+          </h3>
+          <!-- Download Rights Authorization Badge -->
+          ${hasDownloadRights ? `
+            <span class="badge badge-active" style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;" title="You are authorized to download reports in CSV format">
+              <i class="fas fa-check-shield"></i> CSV Export: Authorized
+            </span>
+          ` : `
+            <span class="badge badge-danger" style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;" title="CSV download is restricted for your user account">
+              <i class="fas fa-lock"></i> CSV Export: Restricted
+            </span>
+          `}
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <!-- Admin Permission CRUD Control Button -->
+          ${isAdmin ? `
+            <button class="btn btn-secondary" onclick="openReportPermissionsModal()" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
+              <i class="fas fa-user-shield" style="color: var(--primary);"></i> Manage Export Rights (CRUD)
+            </button>
+          ` : ''}
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-header"><h3 class="card-title">Visits vs Bookings Efficiency</h3></div>
-        <div class="card-body" style="padding: 0;">
-          <table class="data-table">
-            <thead>
-              <tr><th>Executive</th><th>Visits</th><th>Orders Booked</th><th>Conversion Rate</th></tr>
-            </thead>
-            <tbody>
-              <tr><td><strong>Amit Patel</strong></td><td>18</td><td>12</td><td><span class="badge badge-active">66.7%</span></td></tr>
-              <tr><td><strong>Pooja Verma</strong></td><td>14</td><td>8</td><td><span class="badge badge-active">57.1%</span></td></tr>
-            </tbody>
-          </table>
+      <!-- Quick Metrics Overview Ribbon -->
+      <div class="dashboard-grid" style="margin-bottom: 1.25rem;">
+        <div class="stats-card card-teal">
+          <div class="stats-info">
+            <span class="stats-label">Available Reports</span>
+            <span class="stats-value">${ALL_REPORTS.length}</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-file-contract"></i></div>
+        </div>
+
+        <div class="stats-card card-sky">
+          <div class="stats-info">
+            <span class="stats-label">Your Export Access</span>
+            <span class="stats-value" style="font-size: 1.35rem; color: ${hasDownloadRights ? 'var(--success)' : 'var(--danger)'};">
+              ${hasDownloadRights ? 'AUTHORIZED' : 'RESTRICTED'}
+            </span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas ${hasDownloadRights ? 'fa-unlock-alt' : 'fa-lock'}"></i></div>
+        </div>
+
+        <div class="stats-card card-amber">
+          <div class="stats-info">
+            <span class="stats-label">Data Formats</span>
+            <span class="stats-value" style="font-size: 1.35rem;">Live Grid + CSV</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-file-csv"></i></div>
+        </div>
+
+        <div class="stats-card card-emerald">
+          <div class="stats-info">
+            <span class="stats-label">Role Security</span>
+            <span class="stats-value" style="font-size: 1.35rem;">${currentUser.Role} SCOPED</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-user-shield"></i></div>
+        </div>
+      </div>
+
+      <!-- Security Notice Banner if Restricted -->
+      ${!hasDownloadRights ? `
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px 16px; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-shield-alt" style="font-size: 1.4rem; color: var(--danger);"></i>
+            <div>
+              <strong style="color: var(--danger); font-size: 0.9rem;">CSV Export Restricted by Security Policy</strong>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+                You have full access to view, filter, and inspect reports on screen. File downloading is restricted. Contact your Administrator to grant CSV export rights.
+              </div>
+            </div>
+          </div>
+          ${isAdmin ? `
+            <button class="btn btn-secondary btn-sm" onclick="openReportPermissionsModal()">
+              <i class="fas fa-user-cog"></i> Grant Yourself Rights
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+
+      <!-- Category Filter Tabs -->
+      <div style="display: flex; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 1.25rem;">
+        ${categories.map(c => `
+          <button type="button" class="btn ${currentCat === c.key ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setReportCategoryFilter('${c.key}')" style="border-radius: 20px; font-size: 0.8rem; padding: 6px 14px;">
+            ${c.label}
+          </button>
+        `).join('')}
+      </div>
+
+      <!-- Grid of 10 Modern Enterprise Report Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem;">
+        ${filteredReports.map(rep => {
+          const rawCount = rep.getRawData().length;
+          return `
+            <div class="card" style="margin: 0; display: flex; flex-direction: column; justify-content: space-between; transition: transform var(--transition-fast), box-shadow var(--transition-fast); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); hover: transform: translateY(-3px);">
+              <div style="padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                  <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(15, 118, 110, 0.1); color: ${rep.color}; display: flex; align-items: center; justify-content: center; font-size: 1.3rem;">
+                    <i class="${rep.icon}"></i>
+                  </div>
+                  <span class="badge ${rep.badgeClass}" style="font-size: 0.7rem;">${rep.category}</span>
+                </div>
+
+                <h4 style="margin: 0 0 6px; font-size: 1.05rem; font-weight: 700; color: var(--text-main); line-height: 1.3;">
+                  ${rep.name}
+                </h4>
+
+                <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 12px; min-height: 42px;">
+                  ${rep.desc}
+                </p>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.775rem; color: var(--text-muted); padding-top: 10px; border-top: 1px dashed var(--border-color);">
+                  <span><i class="fas fa-database" style="color: var(--primary);"></i> <strong>${rawCount}</strong> ${rawCount === 1 ? 'Record' : 'Records'}</span>
+                  <span><i class="fas fa-check" style="color: var(--success);"></i> Role Scoped</span>
+                </div>
+              </div>
+
+              <div style="padding: 0.75rem 1.25rem; background: var(--bg-primary); border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
+                <!-- 1. View & Filter Live Table -->
+                <button type="button" class="btn btn-primary btn-sm" onclick="openReport('${rep.id}')" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                  <i class="fas fa-table"></i> View & Filter
+                </button>
+
+                <!-- 2. Direct CSV Download (Governed by RBAC) -->
+                ${hasDownloadRights ? `
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="downloadReportCsv('${rep.id}')" title="Download CSV immediately" style="display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0;">
+                    <i class="fas fa-file-csv" style="color: var(--success); font-size: 1rem;"></i>
+                  </button>
+                ` : `
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="showDownloadDeniedNotice()" title="Download Restricted - Contact Admin" style="display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; opacity: 0.5; cursor: not-allowed;">
+                    <i class="fas fa-lock" style="color: var(--danger);"></i>
+                  </button>
+                `}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  window.setReportCategoryFilter = function(cat) {
+    window.activeReportCategory = cat;
+    renderReports();
+  };
+
+  window.openReport = function(reportId) {
+    window.activeReportId = reportId;
+    window.reportDatePreset = "ALL";
+    window.reportFilters = { fromDate: "", toDate: "", employeeId: "", query: "" };
+    renderReports();
+  };
+
+  window.closeActiveReport = function() {
+    window.activeReportId = null;
+    renderReports();
+  };
+
+  /**
+   * =========================================================================
+   * 4. ACTIVE REPORT VIEWER: MULTI-DIMENSIONAL FILTERS, KPIS & DATA GRID
+   * =========================================================================
+   */
+  function renderActiveReportView(container, reportId, hasDownloadRights, isAdmin) {
+    const report = ALL_REPORTS.find(r => r.id === reportId);
+    if (!report) {
+      window.activeReportId = null;
+      renderReports(container);
+      return;
+    }
+
+    // 1. Fetch raw scoped data
+    const rawData = report.getRawData();
+
+    // 2. Apply Filters (Date Range, Employee, Query)
+    const filters = window.reportFilters || {};
+    const filteredRows = rawData.filter(row => {
+      // Date filter
+      if (report.getDate) {
+        const rowDate = report.getDate(row);
+        if (rowDate) {
+          if (filters.fromDate && rowDate < filters.fromDate) return false;
+          if (filters.toDate && rowDate > filters.toDate) return false;
+        }
+      }
+      // Employee filter
+      if (report.getUser && filters.employeeId) {
+        const rowUser = report.getUser(row);
+        if (rowUser && rowUser !== filters.employeeId) return false;
+      }
+      // Global text search query
+      if (filters.query) {
+        const q = filters.query.toLowerCase().trim();
+        const matches = Object.values(row).some(v => String(v || '').toLowerCase().includes(q));
+        if (!matches) return false;
+      }
+      return true;
+    });
+
+    // 3. Compute Dynamic KPIs
+    const kpis = report.getKPIs ? report.getKPIs(filteredRows) : [];
+
+    container.innerHTML = `
+      <!-- Back Navigation & Header Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeActiveReport()" style="display: inline-flex; align-items: center; gap: 6px;">
+            <i class="fas fa-arrow-left"></i> All Reports
+          </button>
+          <div>
+            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+              <i class="${report.icon}" style="color: ${report.color};"></i> ${report.name}
+            </h3>
+            <span style="font-size: 0.775rem; color: var(--text-muted);">${report.category} • Showing ${filteredRows.length} of ${rawData.length} records</span>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <!-- Secure CSV Download Action Button -->
+          ${hasDownloadRights ? `
+            <button type="button" class="btn btn-primary" onclick="downloadReportCsv('${report.id}')" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+              <i class="fas fa-file-csv"></i> Download CSV
+            </button>
+          ` : `
+            <button type="button" class="btn btn-secondary" onclick="showDownloadDeniedNotice()" title="Download Restricted by Admin" style="display: inline-flex; align-items: center; gap: 6px; opacity: 0.6; cursor: not-allowed;">
+              <i class="fas fa-lock" style="color: var(--danger);"></i> Download Restricted
+            </button>
+          `}
+
+          <button type="button" class="btn btn-secondary" onclick="window.print()" title="Print / PDF Save">
+            <i class="fas fa-print"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Security Notice Banner for Non-Authorized Users -->
+      ${!hasDownloadRights ? `
+        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); border-radius: 8px; padding: 10px 14px; margin-bottom: 1.25rem; font-size: 0.825rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-shield-alt" style="color: var(--warning); font-size: 1.1rem;"></i>
+            <span><strong>Read-Only Access:</strong> You can view and search this report on-screen, but CSV export is locked under your role permissions.</span>
+          </div>
+          ${isAdmin ? `
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openReportPermissionsModal()" style="font-size: 0.75rem; padding: 2px 8px;">
+              Manage Rights
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+
+      <!-- Dynamic KPI Metric Stat Cards -->
+      <div class="dashboard-grid" style="margin-bottom: 1.25rem;">
+        ${kpis.map(k => `
+          <div class="stats-card">
+            <div class="stats-info">
+              <span class="stats-label">${k.label}</span>
+              <span class="stats-value" style="color: ${k.color}; font-size: 1.5rem;">${k.val}</span>
+            </div>
+            <div class="stats-icon-wrapper" style="background-color: rgba(15, 118, 110, 0.1); color: ${k.color};">
+              <i class="${k.icon}"></i>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Filter Controls Toolbar -->
+      <div class="card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; background: var(--bg-secondary);">
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+          
+          <!-- Date Presets -->
+          <div>
+            <label class="form-label" style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase;">Date Filter Preset</label>
+            <div style="display: flex; gap: 4px;">
+              <button type="button" class="btn ${window.reportDatePreset === 'ALL' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setReportDatePreset('ALL')" style="font-size: 0.75rem; padding: 4px 8px;">All Time</button>
+              <button type="button" class="btn ${window.reportDatePreset === 'TODAY' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setReportDatePreset('TODAY')" style="font-size: 0.75rem; padding: 4px 8px;">Today</button>
+              <button type="button" class="btn ${window.reportDatePreset === '7D' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setReportDatePreset('7D')" style="font-size: 0.75rem; padding: 4px 8px;">Last 7 Days</button>
+              <button type="button" class="btn ${window.reportDatePreset === 'MONTH' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setReportDatePreset('MONTH')" style="font-size: 0.75rem; padding: 4px 8px;">This Month</button>
+            </div>
+          </div>
+
+          <!-- Custom From Date -->
+          <div style="min-width: 140px;">
+            <label class="form-label" style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase;">From Date</label>
+            <input type="date" class="form-control form-control-sm" value="${filters.fromDate || ''}" onchange="window.reportFilters.fromDate = this.value; window.reportDatePreset = 'CUSTOM'; renderActiveReportView(document.getElementById('app-content'), '${report.id}', ${hasDownloadRights}, ${isAdmin})">
+          </div>
+
+          <!-- Custom To Date -->
+          <div style="min-width: 140px;">
+            <label class="form-label" style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase;">To Date</label>
+            <input type="date" class="form-control form-control-sm" value="${filters.toDate || ''}" onchange="window.reportFilters.toDate = this.value; window.reportDatePreset = 'CUSTOM'; renderActiveReportView(document.getElementById('app-content'), '${report.id}', ${hasDownloadRights}, ${isAdmin})">
+          </div>
+
+          <!-- Employee Filter (Scoping respected) -->
+          <div style="min-width: 180px;">
+            <label class="form-label" style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase;">Field Executive</label>
+            <select class="form-control form-control-sm" onchange="window.reportFilters.employeeId = this.value; renderActiveReportView(document.getElementById('app-content'), '${report.id}', ${hasDownloadRights}, ${isAdmin})">
+              <option value="">-- All Executives --</option>
+              ${(state.users || []).map(u => `
+                <option value="${u.User_ID}" ${filters.employeeId === u.User_ID ? 'selected' : ''}>${u.Full_Name} (${u.Role})</option>
+              `).join('')}
+            </select>
+          </div>
+
+          <!-- Search Query -->
+          <div style="flex: 1; min-width: 200px;">
+            <label class="form-label" style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase;">Quick Search</label>
+            <div style="position: relative;">
+              <input type="text" class="form-control form-control-sm" placeholder="Search any column..." value="${filters.query || ''}" oninput="window.reportFilters.query = this.value; renderActiveReportView(document.getElementById('app-content'), '${report.id}', ${hasDownloadRights}, ${isAdmin})">
+            </div>
+          </div>
+
+          <!-- Reset Filter -->
+          <div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="resetActiveReportFilters('${report.id}')" title="Reset all filters">
+              <i class="fas fa-undo"></i> Reset
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Live Paginated / Scrollable Data Table -->
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              ${report.columns.map(c => `<th>${c.label}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredRows.length === 0 ? `
+              <tr>
+                <td colspan="${report.columns.length}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
+                  <i class="fas fa-search" style="font-size: 1.5rem; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+                  No records match your selected date range and filter criteria.
+                </td>
+              </tr>
+            ` : filteredRows.map(row => `
+              <tr>
+                ${report.columns.map(col => {
+                  let val = col.getVal ? col.getVal(row) : row[col.key];
+                  if (val === undefined || val === null) val = "-";
+
+                  if (col.format === "bold") {
+                    return `<td><strong>${val}</strong></td>`;
+                  } else if (col.format === "currency") {
+                    return `<td style="font-weight: 600; text-align: right;">₹${Number(val || 0).toLocaleString()}</td>`;
+                  } else if (col.format === "currency_bold") {
+                    return `<td style="font-weight: 800; color: var(--primary); text-align: right;">₹${Number(val || 0).toLocaleString()}</td>`;
+                  } else if (col.format === "mins") {
+                    return `<td><span class="badge badge-active">${val} mins</span></td>`;
+                  } else if (col.format === "code") {
+                    return `<td><code style="background: rgba(15, 118, 110, 0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.775rem;">${val}</code></td>`;
+                  } else if (col.format === "badge") {
+                    const st = String(val).toUpperCase();
+                    let bClass = "badge-pending";
+                    if (st.includes("COMPLETED") || st.includes("APPROVED") || st.includes("ACTIVE") || st.includes("DELIVERED") || st.includes("VERIFIED") || st.includes("SETTLED") || st.includes("ADEQUATE")) bClass = "badge-active";
+                    else if (st.includes("REJECTED") || st.includes("LOW") || st.includes("OVERDUE") || st.includes("CRITICAL")) bClass = "badge-danger";
+                    return `<td><span class="badge ${bClass}">${val}</span></td>`;
+                  }
+                  return `<td>${val}</td>`;
+                }).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  window.setReportDatePreset = function(preset) {
+    window.reportDatePreset = preset;
+    const today = new Date().toISOString().split('T')[0];
+    if (preset === 'ALL') {
+      window.reportFilters.fromDate = "";
+      window.reportFilters.toDate = "";
+    } else if (preset === 'TODAY') {
+      window.reportFilters.fromDate = today;
+      window.reportFilters.toDate = today;
+    } else if (preset === '7D') {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      window.reportFilters.fromDate = d.toISOString().split('T')[0];
+      window.reportFilters.toDate = today;
+    } else if (preset === 'MONTH') {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      window.reportFilters.fromDate = firstDay;
+      window.reportFilters.toDate = today;
+    }
+    renderReports();
+  };
+
+  window.resetActiveReportFilters = function(reportId) {
+    window.reportDatePreset = "ALL";
+    window.reportFilters = { fromDate: "", toDate: "", employeeId: "", query: "" };
+    renderReports();
+  };
+
+  window.showDownloadDeniedNotice = function() {
+    showToast("Export Denied: You do not have permission to download reports. Contact Administrator to request CSV export rights.", "error");
+  };
+
+  /**
+   * =========================================================================
+   * 5. HIGH-FIDELITY RFC 4180 CSV EXPORT ENGINE WITH UTF-8 BOM
+   * =========================================================================
+   */
+  window.downloadReportCsv = function(reportId) {
+    const currentUser = state.currentUser || { Role: "EXECUTIVE", User_ID: "USR-102" };
+    if (!canUserDownloadReports(currentUser)) {
+      showDownloadDeniedNotice();
+      return;
+    }
+
+    const report = ALL_REPORTS.find(r => r.id === reportId);
+    if (!report) {
+      showToast("Report definition not found.", "error");
+      return;
+    }
+
+    // Filter data according to active filters
+    const rawData = report.getRawData();
+    const filters = window.reportFilters || {};
+    const filteredRows = rawData.filter(row => {
+      if (report.getDate) {
+        const rowDate = report.getDate(row);
+        if (rowDate) {
+          if (filters.fromDate && rowDate < filters.fromDate) return false;
+          if (filters.toDate && rowDate > filters.toDate) return false;
+        }
+      }
+      if (report.getUser && filters.employeeId) {
+        const rowUser = report.getUser(row);
+        if (rowUser && rowUser !== filters.employeeId) return false;
+      }
+      if (filters.query) {
+        const q = filters.query.toLowerCase().trim();
+        const matches = Object.values(row).some(v => String(v || '').toLowerCase().includes(q));
+        if (!matches) return false;
+      }
+      return true;
+    });
+
+    if (filteredRows.length === 0) {
+      showToast("No data matching current filters to export.", "warning");
+      return;
+    }
+
+    // Build CSV Headers
+    const headers = report.columns.map(c => `"${c.label.replace(/"/g, '""')}"`);
+    const csvLines = [headers.join(',')];
+
+    // Build CSV Rows
+    filteredRows.forEach(row => {
+      const lineVals = report.columns.map(col => {
+        let val = col.getVal ? col.getVal(row) : row[col.key];
+        if (val === undefined || val === null) val = "";
+        let str = String(val).trim();
+        // Escape double quotes and enclose in quotes
+        return `"${str.replace(/"/g, '""')}"`;
+      });
+      csvLines.push(lineVals.join(','));
+    });
+
+    // Add Metadata Footer
+    csvLines.push('');
+    csvLines.push(`"Report Generated By: ${currentUser.Full_Name} (${currentUser.Role})"`);
+    csvLines.push(`"Generated On: ${new Date().toLocaleString()}"`);
+    csvLines.push(`"Organization: ${state.company.name || 'Apex Global Enterprises'}"`);
+
+    // Prepend UTF-8 BOM (\uFEFF) for Microsoft Excel compatibility
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const filename = `Nexallot_${report.id}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Report '${report.name}' downloaded successfully! (${filteredRows.length} rows)`, "success");
+  };
+
+  /**
+   * =========================================================================
+   * 6. RBAC PERMISSIONS CRUD MANAGEMENT MODAL
+   * Allows Admin to view, grant, restrict, and reset export rights per user/role
+   * =========================================================================
+   */
+  window.openReportPermissionsModal = function() {
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    renderReportPermissionsModalContent();
+  };
+
+  function renderReportPermissionsModalContent() {
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    const perms = getReportExportPermissions();
+    const users = state.users || [];
+    const searchQuery = (window.permsUserSearch || "").toLowerCase();
+
+    const filteredUsers = users.filter(u => {
+      return u.Full_Name.toLowerCase().includes(searchQuery) ||
+             u.User_ID.toLowerCase().includes(searchQuery) ||
+             (u.Department || "").toLowerCase().includes(searchQuery) ||
+             (u.Role || "").toLowerCase().includes(searchQuery);
+    });
+
+    const authorizedCount = users.filter(u => canUserDownloadReports(u)).length;
+    const restrictedCount = users.length - authorizedCount;
+
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 760px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
+          
+          <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+            <div>
+              <h3 class="modal-title" style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-user-shield" style="color: var(--primary);"></i> Report Export Rights & RBAC Permissions (CRUD)
+              </h3>
+              <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 2px;">
+                Configure system-wide role defaults and individual user download overrides.
+              </div>
+            </div>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="modal-body" style="overflow-y: auto; padding: 1.25rem;">
+            
+            <!-- Summary Stats Ribbon -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 1.25rem;">
+              <div style="background: var(--bg-primary); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Total Users</div>
+                <div style="font-size: 1.3rem; font-weight: 800;">${users.length} Employees</div>
+              </div>
+              <div style="background: rgba(16, 185, 129, 0.08); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.25);">
+                <div style="font-size: 0.72rem; color: var(--success); text-transform: uppercase; font-weight: 700;">Download Authorized</div>
+                <div style="font-size: 1.3rem; font-weight: 800; color: var(--success);">${authorizedCount} Authorized</div>
+              </div>
+              <div style="background: rgba(239, 68, 68, 0.08); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.25);">
+                <div style="font-size: 0.72rem; color: var(--danger); text-transform: uppercase; font-weight: 700;">Download Restricted</div>
+                <div style="font-size: 1.3rem; font-weight: 800; color: var(--danger);">${restrictedCount} Restricted</div>
+              </div>
+            </div>
+
+            <!-- Level 1: Role Default Permissions -->
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; margin-bottom: 1.25rem;">
+              <h4 style="margin: 0 0 8px; font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                <i class="fas fa-sliders-h" style="color: var(--primary);"></i> 1. Role-Level Default Download Policy
+              </h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
+                
+                <!-- ADMIN -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                  <span style="font-weight: 600; font-size: 0.825rem;">ADMIN</span>
+                  <span class="badge badge-active" title="Admin always has full download rights"><i class="fas fa-lock"></i> Enabled</span>
+                </div>
+
+                <!-- MANAGER -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                  <span style="font-weight: 600; font-size: 0.825rem;">MANAGER</span>
+                  <button type="button" class="btn ${perms.roleDefaults.MANAGER ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleRolePermission('MANAGER')" style="font-size: 0.725rem; padding: 2px 8px;">
+                    ${perms.roleDefaults.MANAGER ? 'Allowed' : 'Restricted'}
+                  </button>
+                </div>
+
+                <!-- ACCOUNTS -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                  <span style="font-weight: 600; font-size: 0.825rem;">ACCOUNTS</span>
+                  <button type="button" class="btn ${perms.roleDefaults.ACCOUNTS ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleRolePermission('ACCOUNTS')" style="font-size: 0.725rem; padding: 2px 8px;">
+                    ${perms.roleDefaults.ACCOUNTS ? 'Allowed' : 'Restricted'}
+                  </button>
+                </div>
+
+                <!-- EXECUTIVE -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+                  <span style="font-weight: 600; font-size: 0.825rem;">EXECUTIVE</span>
+                  <button type="button" class="btn ${perms.roleDefaults.EXECUTIVE ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleRolePermission('EXECUTIVE')" style="font-size: 0.725rem; padding: 2px 8px;">
+                    ${perms.roleDefaults.EXECUTIVE ? 'Allowed' : 'Restricted'}
+                  </button>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- Level 2: User-Specific Custom Overrides (CRUD Table) -->
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                  <i class="fas fa-user-edit" style="color: var(--primary);"></i> 2. User-Specific Overrides (CRUD)
+                </h4>
+                <div style="display: flex; gap: 6px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="bulkGrantAll()" style="font-size: 0.75rem; padding: 3px 8px;">
+                    <i class="fas fa-check-double"></i> Grant All
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="bulkRestrictExecutives()" style="font-size: 0.75rem; padding: 3px 8px;">
+                    <i class="fas fa-ban"></i> Restrict Executives
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="resetAllOverrides()" style="font-size: 0.75rem; padding: 3px 8px;">
+                    <i class="fas fa-undo"></i> Reset All Overrides
+                  </button>
+                </div>
+              </div>
+
+              <!-- Search Bar -->
+              <div style="margin-bottom: 8px;">
+                <input type="text" class="form-control form-control-sm" placeholder="Filter employee by name, ID or department..." value="${window.permsUserSearch || ''}" oninput="window.permsUserSearch = this.value; renderReportPermissionsModalContent();">
+              </div>
+
+              <!-- Table -->
+              <div style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; max-height: 280px; overflow-y: auto;">
+                <table class="data-table" style="font-size: 0.8rem;">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Role</th>
+                      <th>Inherited Policy</th>
+                      <th>Effective Status</th>
+                      <th style="text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${filteredUsers.map(u => {
+                      const isAuth = canUserDownloadReports(u);
+                      const hasOverride = perms.userOverrides && perms.userOverrides[u.User_ID] !== undefined;
+                      const roleDefault = perms.roleDefaults[u.Role] !== undefined ? perms.roleDefaults[u.Role] : (u.Role === "ADMIN");
+
+                      return `
+                        <tr>
+                          <td>
+                            <strong>${u.Full_Name}</strong>
+                            <div style="font-size: 0.7rem; color: var(--text-muted);">${u.User_ID} • ${u.Department || 'Operations'}</div>
+                          </td>
+                          <td><span class="badge badge-on-hold" style="font-size: 0.65rem;">${u.Role}</span></td>
+                          <td>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">
+                              ${roleDefault ? 'Allowed by Role' : 'Restricted by Role'}
+                            </span>
+                          </td>
+                          <td>
+                            ${isAuth ? `
+                              <span class="badge badge-active" style="font-size: 0.68rem;">
+                                <i class="fas fa-check"></i> ${hasOverride ? 'Granted (Override)' : 'Granted (Role)'}
+                              </span>
+                            ` : `
+                              <span class="badge badge-danger" style="font-size: 0.68rem;">
+                                <i class="fas fa-lock"></i> ${hasOverride ? 'Restricted (Override)' : 'Restricted (Role)'}
+                              </span>
+                            `}
+                          </td>
+                          <td style="text-align: right; white-space: nowrap;">
+                            ${u.Role === "ADMIN" ? `
+                              <span style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">Always Authorized</span>
+                            ` : `
+                              <div style="display: inline-flex; align-items: center; gap: 4px;">
+                                ${isAuth ? `
+                                  <button type="button" class="btn btn-danger btn-sm" onclick="setUserPermissionOverride('${u.User_ID}', false)" style="font-size: 0.7rem; padding: 2px 7px;" title="Revoke download rights">
+                                    <i class="fas fa-ban"></i> Restrict
+                                  </button>
+                                ` : `
+                                  <button type="button" class="btn btn-success btn-sm" onclick="setUserPermissionOverride('${u.User_ID}', true)" style="font-size: 0.7rem; padding: 2px 7px;" title="Grant download rights">
+                                    <i class="fas fa-check"></i> Grant
+                                  </button>
+                                `}
+                                ${hasOverride ? `
+                                  <button type="button" class="btn btn-secondary btn-sm" onclick="deleteUserPermissionOverride('${u.User_ID}')" style="font-size: 0.7rem; padding: 2px 6px;" title="Reset to role default">
+                                    <i class="fas fa-undo"></i>
+                                  </button>
+                                ` : ''}
+                              </div>
+                            `}
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="modal-footer" style="border-top: 1px solid var(--border-color); justify-content: space-between;">
+            <span style="font-size: 0.775rem; color: var(--text-muted);">Changes take effect immediately and are persisted locally.</span>
+            <button type="button" class="btn btn-primary" onclick="closeModal(); renderReports();">
+              <i class="fas fa-check"></i> Done
+            </button>
+          </div>
+
         </div>
       </div>
     `;
   }
 
-  /**
-   * 12. SETTINGS VIEW
-   */
+  window.toggleRolePermission = function(role) {
+    const perms = getReportExportPermissions();
+    perms.roleDefaults[role] = !perms.roleDefaults[role];
+    saveReportExportPermissions(perms);
+    showToast(`Role default for ${role} set to ${perms.roleDefaults[role] ? 'ALLOWED' : 'RESTRICTED'}`, "info");
+    renderReportPermissionsModalContent();
+    renderReports();
+  };
 
+  window.setUserPermissionOverride = function(userId, status) {
+    const perms = getReportExportPermissions();
+    if (!perms.userOverrides) perms.userOverrides = {};
+    perms.userOverrides[userId] = Boolean(status);
+    saveReportExportPermissions(perms);
+    showToast(`Download rights for ${getUserName(userId)} updated to ${status ? 'GRANTED' : 'RESTRICTED'}`, "success");
+    renderReportPermissionsModalContent();
+    renderReports();
+  };
+
+  window.deleteUserPermissionOverride = function(userId) {
+    const perms = getReportExportPermissions();
+    if (perms.userOverrides && perms.userOverrides[userId] !== undefined) {
+      delete perms.userOverrides[userId];
+      saveReportExportPermissions(perms);
+      showToast(`User override for ${getUserName(userId)} removed. Reverted to Role Default.`, "info");
+      renderReportPermissionsModalContent();
+      renderReports();
+    }
+  };
+
+  window.bulkGrantAll = function() {
+    const perms = getReportExportPermissions();
+    perms.roleDefaults.MANAGER = true;
+    perms.roleDefaults.ACCOUNTS = true;
+    perms.roleDefaults.EXECUTIVE = true;
+    perms.userOverrides = {};
+    saveReportExportPermissions(perms);
+    showToast("All roles granted CSV download authorization!", "success");
+    renderReportPermissionsModalContent();
+    renderReports();
+  };
+
+  window.bulkRestrictExecutives = function() {
+    const perms = getReportExportPermissions();
+    perms.roleDefaults.EXECUTIVE = false;
+    (state.users || []).forEach(u => {
+      if (u.Role === "EXECUTIVE" && perms.userOverrides && perms.userOverrides[u.User_ID]) {
+        delete perms.userOverrides[u.User_ID];
+      }
+    });
+    saveReportExportPermissions(perms);
+    showToast("Field Executives restricted from CSV export by default.", "info");
+    renderReportPermissionsModalContent();
+    renderReports();
+  };
+
+  window.resetAllOverrides = function() {
+    const perms = getReportExportPermissions();
+    perms.userOverrides = {};
+    saveReportExportPermissions(perms);
+    showToast("All custom user overrides cleared.", "info");
+    renderReportPermissionsModalContent();
+    renderReports();
+  };
+
+  // Global Exports
   window.renderReports = renderReports;
-  window.exportReportToCsv = typeof exportReportToCsv !== 'undefined' ? exportReportToCsv : function(r) { showToast("Exporting " + r + "...", "info"); };
+  window.openActiveReport = openReport;
+  window.ALL_REPORTS = ALL_REPORTS;
 })();
 </script>
   <script>
