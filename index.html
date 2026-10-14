@@ -1984,6 +1984,14 @@ h1, h2, h3, h4, h5, h6 {
             <span id="header-role-text">EXECUTIVE</span>
           </div>
 
+          <!-- Logged In User Avatar in Header Right (Round profile image) -->
+          <div id="header-user-profile-wrap" onclick="typeof openCurrentUserProfileModal === 'function' ? openCurrentUserProfileModal() : showToast('Logged in as ' + (state.currentUser ? state.currentUser.Full_Name : 'User'), 'info')" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 2px 10px 2px 2px; border-radius: 30px; border: 1px solid var(--border-color); background: var(--bg-secondary); box-shadow: var(--shadow-sm); transition: all 0.2s;" title="Click to view/edit your profile photo">
+            <div id="header-user-avatar-img-wrap" style="width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.775rem; border: 1.5px solid var(--primary); flex-shrink: 0;">
+              <span id="header-user-avatar-initials">AP</span>
+            </div>
+            <span id="header-user-name-text" style="font-size: 0.825rem; font-weight: 600; color: var(--text-main);">Amit Patel</span>
+          </div>
+
           <!-- Refresh Button -->
           <button class="btn btn-secondary btn-sm" id="header-refresh-btn" onclick="refreshCurrentView()" title="Refresh Data" style="display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 50px;">
             <i class="fas fa-sync-alt" id="header-refresh-icon" style="color: var(--primary);"></i> <span>Refresh</span>
@@ -3015,6 +3023,45 @@ h1, h2, h3, h4, h5, h6 {
   }
   window.updateHeaderMeta = updateHeaderMeta;
 
+  function updateNavUserProfile() {
+    const u = state.currentUser || { Role: "ADMIN", User_ID: "USR-100", Full_Name: "Vikram Shah" };
+    // 1. Sidebar name and role
+    const nun = document.getElementById("nav-user-name");
+    if (nun) nun.innerText = u.Full_Name || "User";
+    const nur = document.getElementById("nav-user-role");
+    if (nur) nur.innerText = u.Role || "EXECUTIVE";
+    
+    // Initials
+    const initials = (u.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
+
+    // 2. Sidebar Avatar
+    const nua = document.getElementById("nav-user-avatar");
+    if (nua) {
+      if (u.Photo) {
+        nua.innerHTML = `<img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" alt="${u.Full_Name}">`;
+      } else {
+        nua.innerHTML = initials;
+      }
+    }
+
+    // 3. Header Role Badge
+    const hrt = document.getElementById("header-role-text");
+    if (hrt) hrt.innerText = u.Role || "EXECUTIVE";
+
+    // 4. Header Top Right User Avatar
+    const hua = document.getElementById("header-user-avatar-img-wrap");
+    if (hua) {
+      if (u.Photo) {
+        hua.innerHTML = `<img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" alt="${u.Full_Name}">`;
+      } else {
+        hua.innerHTML = `<span id="header-user-avatar-initials">${initials}</span>`;
+      }
+    }
+    const hun = document.getElementById("header-user-name-text");
+    if (hun) hun.innerText = u.Full_Name || "User";
+  }
+  window.updateNavUserProfile = updateNavUserProfile;
+
   function handleRoleSwitch(role) {
     if (!state.currentUser) state.currentUser = { Role: role, User_ID: "USR-102", Full_Name: "Amit Patel" };
     state.currentUser.Role = role;
@@ -3023,13 +3070,14 @@ h1, h2, h3, h4, h5, h6 {
     else if (role === "EXECUTIVE") { state.currentUser.User_ID = "USR-102"; state.currentUser.Full_Name = "Amit Patel"; }
     else if (role === "ACCOUNTS") { state.currentUser.User_ID = "USR-104"; state.currentUser.Full_Name = "Suresh Gupta"; }
 
-    const nun = document.getElementById("nav-user-name");
-    if (nun) nun.innerText = state.currentUser.Full_Name;
-    const nur = document.getElementById("nav-user-role");
-    if (nur) nur.innerText = role;
-    const nua = document.getElementById("nav-user-avatar");
-    if (nua) nua.innerText = state.currentUser.Full_Name.split(" ").map(n=>n[0]).join("");
-    
+    const matchingUser = (state.users || []).find(u => u.User_ID === state.currentUser.User_ID);
+    if (matchingUser) {
+      state.currentUser.Photo = matchingUser.Photo || "";
+      state.currentUser.Department = matchingUser.Department || state.currentUser.Department;
+      state.currentUser.Designation = matchingUser.Designation || state.currentUser.Designation;
+    }
+
+    updateNavUserProfile();
     updateHeaderMeta(state.currentView);
     renderView(state.currentView);
     showToast('Switched view to ' + role + ': ' + state.currentUser.Full_Name, "info");
@@ -13476,162 +13524,1247 @@ window.openNewClientModal = window.openClientModal;
 </script>
   <script>
 (function() {
-    function renderUsers(container) {
-    const isAdmin = state.currentUser.Role === "ADMIN";
+  /**
+   * =========================================================================
+   * NEXALLOT USERS & ROLES MATRIX - SINGLE-WINDOW HR & FACILITY ACCESS HUB
+   * Complete Employee Master, Photo Management, Role Scoping & Facility CRUD
+   * =========================================================================
+   */
 
-    container.innerHTML = `
-      ${isAdmin ? `
-        <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem;">
-          <button class="btn btn-primary" onclick="openNewUserModal()"><i class="fas fa-user-plus"></i> Add Employee</button>
-        </div>
-      ` : ''}
+  // 12 System Core Facilities & Permissions
+  const SYSTEM_FACILITIES = [
+    { id: "dashboard", label: "Executive Dashboard & KPIs", icon: "fas fa-chart-line", desc: "View real-time operations, team stats & conversion charts" },
+    { id: "visits", label: "Field Visits & GPS Attendance", icon: "fas fa-map-marker-alt", desc: "GPS check-in/out, live location tagging & route minutes" },
+    { id: "orders", label: "Orders Booking & Delivery", icon: "fas fa-shopping-cart", desc: "Multi-item booking with CGST/SGST/IGST, dispatch & returns" },
+    { id: "inventory", label: "Live Product Inventory", icon: "fas fa-boxes", desc: "Stock lookup, warehouse levels, pricing & reorder thresholds" },
+    { id: "payments", label: "Payment Collections & Ledger", icon: "fas fa-wallet", desc: "Cash/UPI/Cheque receipts, deposit verification & WhatsApp slips" },
+    { id: "expenses", label: "Expense Claims & Approvals", icon: "fas fa-receipt", desc: "Multi-line claims, mileage calc, L1/L2/L3 approval & payout" },
+    { id: "complaints", label: "Customer Service & Complaints", icon: "fas fa-tools", desc: "Ticket registration, preventative service, SLA & tech dispatch" },
+    { id: "clients", label: "Client Directory & 360° Profile", icon: "fas fa-building", desc: "Customer master, credit limits, GPS tagging & outstanding dues" },
+    { id: "reports", label: "Analytics & Reports Viewer", icon: "fas fa-chart-bar", desc: "Interactive BI catalog of 10 enterprise operational reports" },
+    { id: "reports_export", label: "CSV Export & Download Rights", icon: "fas fa-file-csv", desc: "Authorization to download raw company CSV exports" },
+    { id: "users_crud", label: "Users & Staff Administration", icon: "fas fa-user-shield", desc: "Add/edit employee records, manage roles & single-window control" },
+    { id: "masters_setup", label: "Masters & System Setup", icon: "fas fa-sliders-h", desc: "Configure system dropdowns, GST rates & company license" }
+  ];
 
-      <div class="card" style="margin-bottom: 1.5rem;">
-        <div class="card-header"><h3 class="card-title">Employee Master Records</h3></div>
-        <div class="card-body" style="padding: 0;">
-          <div class="table-wrapper" style="border: none;">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>User ID</th>
-                  <th>Full Name</th>
-                  <th>DOJ</th>
-                  <th>Contact No</th>
-                  <th>Email ID</th>
-                  <th>Department</th>
-                  <th>Designation</th>
-                  <th>Manager</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${state.users.map(u => `
-                  <tr>
-                    <td><strong>${u.User_ID}</strong></td>
-                    <td><strong>${u.Full_Name}</strong></td>
-                    <td>${u.DOJ || '-'}</td>
-                    <td>${u.Mobile || '-'}</td>
-                    <td>${u.Email || '-'}</td>
-                    <td>${u.Department || '-'}</td>
-                    <td>${u.Designation || '-'}</td>
-                    <td>${u.Manager_Name || '-'}</td>
-                    <td><span class="badge badge-on-hold">${u.Role}</span></td>
-                    <td><span class="badge ${u.Status === 'ACTIVE' ? 'badge-active' : 'badge-danger'}">${u.Status}</span></td>
-                    <td>
-                      ${isAdmin ? `
-                        <button class="btn btn-secondary btn-sm" onclick="showToast('Edit user modal', 'info')"><i class="fas fa-edit"></i></button>
-                      ` : '-'}
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
+  window.SYSTEM_FACILITIES = SYSTEM_FACILITIES;
+
+  // Selected user IDs for bulk actions
+  window.selectedUserIds = window.selectedUserIds || [];
+  window.usersSearchQuery = window.usersSearchQuery || "";
+  window.usersRoleFilter = window.usersRoleFilter || "ALL";
+  window.usersStatusFilter = window.usersStatusFilter || "ALL";
+
+  /**
+   * Helper: Get standard default facility permissions for a given role
+   */
+  function getDefaultPermissionsForRole(role) {
+    const p = {};
+    SYSTEM_FACILITIES.forEach(f => { p[f.id] = false; });
+
+    if (role === "ADMIN") {
+      SYSTEM_FACILITIES.forEach(f => { p[f.id] = true; });
+    } else if (role === "MANAGER") {
+      ["dashboard", "visits", "orders", "inventory", "payments", "expenses", "complaints", "clients", "reports", "reports_export"].forEach(id => { p[id] = true; });
+    } else if (role === "EXECUTIVE") {
+      ["dashboard", "visits", "orders", "inventory", "payments", "expenses", "complaints", "clients", "reports"].forEach(id => { p[id] = true; });
+    } else if (role === "ACCOUNTS") {
+      ["dashboard", "orders", "payments", "expenses", "clients", "reports", "reports_export"].forEach(id => { p[id] = true; });
+    }
+    return p;
+  }
+
+  function getUserPermissions(u) {
+    if (!u) return getDefaultPermissionsForRole("EXECUTIVE");
+    if (u.Permissions && typeof u.Permissions === 'object') return u.Permissions;
+    if (u.Permissions_JSON) {
+      try { return JSON.parse(u.Permissions_JSON); } catch(e) {}
+    }
+    return getDefaultPermissionsForRole(u.Role || "EXECUTIVE");
   }
 
   /**
-   * 10. MASTERS & DROPDOWNS CUSTOMIZATION HUB (FULL ADMIN & ASSIGNED USER CONFIGURABILITY)
+   * =========================================================================
+   * 1. MAIN VIEW: RENDER USERS & ROLES MATRIX
+   * =========================================================================
    */
-    function openNewUserModal() {
+  function renderUsers(container) {
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
+
+    const currentUser = state.currentUser || { Role: "ADMIN", User_ID: "USR-100", Full_Name: "Vikram Shah" };
+    const isAdmin = currentUser.Role === "ADMIN";
+    const users = state.users || [];
+
+    // Filter users by search, role, and status
+    const q = (window.usersSearchQuery || "").toLowerCase().trim();
+    const roleF = window.usersRoleFilter || "ALL";
+    const statusF = window.usersStatusFilter || "ALL";
+
+    const filteredUsers = users.filter(u => {
+      const matchQ = !q || (
+        (u.Full_Name || "").toLowerCase().includes(q) ||
+        (u.User_ID || "").toLowerCase().includes(q) ||
+        (u.Email || "").toLowerCase().includes(q) ||
+        (u.Mobile || "").toLowerCase().includes(q) ||
+        (u.Department || "").toLowerCase().includes(q) ||
+        (u.Designation || "").toLowerCase().includes(q) ||
+        (u.Territory_Zone || "").toLowerCase().includes(q)
+      );
+      const matchRole = roleF === "ALL" || u.Role === roleF;
+      const matchStatus = statusF === "ALL" || (u.Status || "ACTIVE") === statusF;
+      return matchQ && matchRole && matchStatus;
+    });
+
+    const activeCount = users.filter(u => (u.Status || "ACTIVE") === "ACTIVE").length;
+    const inactiveCount = users.length - activeCount;
+    const selectedCount = (window.selectedUserIds || []).length;
+    const allFilteredSelected = filteredUsers.length > 0 && filteredUsers.every(u => (window.selectedUserIds || []).includes(u.User_ID));
+
+    container.innerHTML = `
+      <!-- Top Action & Overview Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-users-cog" style="color: var(--primary);"></i> Users & Roles Administration
+          </h3>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">
+            Manage employee master records, profile photos, credentials & facility access rights
+          </span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" onclick="exportUsersToCsv()" style="display: inline-flex; align-items: center; gap: 6px;">
+            <i class="fas fa-file-excel" style="color: var(--success);"></i> Export Staff Directory
+          </button>
+          ${isAdmin ? `
+            <button class="btn btn-primary" onclick="openNewUserModal()" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+              <i class="fas fa-user-plus"></i> Add Employee
+            </button>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- KPI Metrics Cards -->
+      <div class="dashboard-grid" style="margin-bottom: 1.25rem;">
+        <div class="stats-card card-teal">
+          <div class="stats-info">
+            <span class="stats-label">Total Staff</span>
+            <span class="stats-value">${users.length}</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-id-badge"></i></div>
+        </div>
+
+        <div class="stats-card card-emerald">
+          <div class="stats-info">
+            <span class="stats-label">Active Accounts</span>
+            <span class="stats-value">${activeCount}</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-user-check"></i></div>
+        </div>
+
+        <div class="stats-card card-amber">
+          <div class="stats-info">
+            <span class="stats-label">Inactive / On Leave</span>
+            <span class="stats-value">${inactiveCount}</span>
+          </div>
+          <div class="stats-icon-wrapper"><i class="fas fa-user-clock"></i></div>
+        </div>
+
+        <div class="stats-card card-sky">
+          <div class="stats-info">
+            <span class="stats-label">Your Logged-in Profile</span>
+            <span class="stats-value" style="font-size: 1.15rem; color: var(--primary);">${currentUser.Full_Name.split(" ")[0]} (${currentUser.Role})</span>
+          </div>
+          <div class="stats-icon-wrapper" style="cursor: pointer;" onclick="openCurrentUserProfileModal()" title="Edit profile photo"><i class="fas fa-camera"></i></div>
+        </div>
+      </div>
+
+      <!-- Search & Multi-Filter Toolbar -->
+      <div class="card" style="margin-bottom: 1rem; padding: 0.85rem 1.25rem; background: var(--bg-secondary);">
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+          
+          <div style="display: flex; gap: 10px; flex: 1; max-width: 420px; align-items: center;">
+            <i class="fas fa-search" style="color: var(--text-muted);"></i>
+            <input type="text" class="form-control form-control-sm" placeholder="Search by name, ID, phone, department, zone..." value="${window.usersSearchQuery || ''}" oninput="window.usersSearchQuery = this.value; renderUsers();">
+          </div>
+
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <!-- Role Filter -->
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Role:</span>
+              <select class="form-control form-control-sm" style="width: 140px;" onchange="window.usersRoleFilter = this.value; renderUsers();">
+                <option value="ALL" ${roleF === 'ALL' ? 'selected' : ''}>All Roles</option>
+                <option value="ADMIN" ${roleF === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
+                <option value="MANAGER" ${roleF === 'MANAGER' ? 'selected' : ''}>MANAGER</option>
+                <option value="EXECUTIVE" ${roleF === 'EXECUTIVE' ? 'selected' : ''}>EXECUTIVE</option>
+                <option value="ACCOUNTS" ${roleF === 'ACCOUNTS' ? 'selected' : ''}>ACCOUNTS</option>
+              </select>
+            </div>
+
+            <!-- Status Filter -->
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Status:</span>
+              <select class="form-control form-control-sm" style="width: 130px;" onchange="window.usersStatusFilter = this.value; renderUsers();">
+                <option value="ALL" ${statusF === 'ALL' ? 'selected' : ''}>All Status</option>
+                <option value="ACTIVE" ${statusF === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+                <option value="INACTIVE" ${statusF === 'INACTIVE' ? 'selected' : ''}>INACTIVE</option>
+                <option value="ON_LEAVE" ${statusF === 'ON_LEAVE' ? 'selected' : ''}>ON LEAVE</option>
+                <option value="SUSPENDED" ${statusF === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED</option>
+              </select>
+            </div>
+
+            <!-- Clear Filter Button -->
+            ${(window.usersSearchQuery || roleF !== 'ALL' || statusF !== 'ALL') ? `
+              <button class="btn btn-secondary btn-sm" onclick="clearUsersFilters()" style="font-size: 0.75rem;">
+                <i class="fas fa-times"></i> Clear
+              </button>
+            ` : ''}
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Bulk Actions Bar (Appears when 1+ users checked) -->
+      ${selectedCount > 0 && isAdmin ? `
+        <div style="background: rgba(15, 118, 110, 0.08); border: 1.5px solid var(--primary); border-radius: 8px; padding: 10px 16px; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-check-square" style="color: var(--primary); font-size: 1.1rem;"></i>
+            <strong style="color: var(--primary); font-size: 0.9rem;">${selectedCount} Employees Selected</strong>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-success btn-sm" onclick="bulkSetUsersStatus('ACTIVE')">
+              <i class="fas fa-user-check"></i> Set Active
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkSetUsersStatus('INACTIVE')">
+              <i class="fas fa-user-slash"></i> Set Inactive
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkOpenFacilityManager()" style="color: var(--primary); font-weight: 700;">
+              <i class="fas fa-sliders-h"></i> Manage Facilities...
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="bulkDeleteSelectedUsers()">
+              <i class="fas fa-trash"></i> Delete Selected
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="clearUserSelection()">
+              Cancel Selection
+            </button>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Employee Master Records Table -->
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              ${isAdmin ? `
+                <th style="width: 40px; text-align: center;">
+                  <input type="checkbox" id="select-all-users" ${allFilteredSelected ? 'checked' : ''} onchange="toggleSelectAllUsers(this.checked)">
+                </th>
+              ` : ''}
+              <th>Employee Profile</th>
+              <th>DOJ</th>
+              <th>Role & Access</th>
+              <th>Department & Designation</th>
+              <th>Contact Info</th>
+              <th>Reporting Manager</th>
+              <th>Zone / Territory</th>
+              <th>Facility Permissions</th>
+              <th>Status</th>
+              <th style="min-width: 140px; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredUsers.length === 0 ? `
+              <tr>
+                <td colspan="${isAdmin ? 11 : 10}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
+                  <i class="fas fa-user-slash fa-2x" style="margin-bottom: 10px; display: block; opacity: 0.4;"></i>
+                  No employee records found matching your search and filter criteria.
+                </td>
+              </tr>
+            ` : filteredUsers.map(u => {
+              const perms = getUserPermissions(u);
+              const enabledFacilitiesCount = Object.values(perms).filter(Boolean).length;
+              const isSelected = (window.selectedUserIds || []).includes(u.User_ID);
+              const initials = (u.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
+              const isSelf = currentUser && currentUser.User_ID === u.User_ID;
+
+              return `
+                <tr style="${isSelected ? 'background: rgba(15, 118, 110, 0.05);' : ''}">
+                  ${isAdmin ? `
+                    <td style="text-align: center;">
+                      <input type="checkbox" value="${u.User_ID}" ${isSelected ? 'checked' : ''} onchange="toggleUserSelect('${u.User_ID}', this.checked)">
+                    </td>
+                  ` : ''}
+                  
+                  <!-- Employee Photo + Name + ID -->
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <div style="width: 38px; height: 38px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.85rem; border: 1.5px solid var(--border-color); flex-shrink: 0; box-shadow: var(--shadow-sm);">
+                        ${u.Photo ? `
+                          <img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">
+                        ` : initials}
+                      </div>
+                      <div>
+                        <strong>${u.Full_Name}</strong> ${isSelf ? '<span style="font-size: 0.72rem; color: var(--primary); font-weight: 700;">(You)</span>' : ''}
+                        <div style="font-size: 0.725rem; color: var(--text-muted);">${u.User_ID}</div>
+                      </div>
+                    </div>
+                  </td>
+
+                  <!-- Date of Joining (DOJ) -->
+                  <td>
+                    <span style="font-size: 0.825rem; font-weight: 600;">${u.DOJ || '-'}</span>
+                  </td>
+
+                  <!-- Role -->
+                  <td>
+                    <span class="badge ${u.Role === 'ADMIN' ? 'badge-active' : (u.Role === 'MANAGER' ? 'badge-pending' : 'badge-on-hold')}" style="font-size: 0.7rem;">
+                      ${u.Role}
+                    </span>
+                  </td>
+
+                  <!-- Department & Designation -->
+                  <td>
+                    <div style="font-weight: 600; font-size: 0.85rem;">${u.Designation || '-'}</div>
+                    <div style="font-size: 0.725rem; color: var(--text-muted);">${u.Department || '-'}</div>
+                  </td>
+
+                  <!-- Contact Info -->
+                  <td>
+                    <div style="font-size: 0.825rem;"><i class="fas fa-phone" style="font-size: 0.7rem; color: var(--primary); margin-right: 4px;"></i>${u.Mobile || '-'}</div>
+                    ${u.Email ? `<div style="font-size: 0.725rem; color: var(--text-muted);"><i class="fas fa-envelope" style="font-size: 0.7rem; margin-right: 4px;"></i>${u.Email}</div>` : ''}
+                  </td>
+
+                  <!-- Reporting Manager -->
+                  <td>
+                    <span style="font-size: 0.825rem; font-weight: 500;">${u.Manager_Name || '-'}</span>
+                  </td>
+
+                  <!-- Territory Zone -->
+                  <td>
+                    <span class="badge badge-secondary" style="font-size: 0.7rem;">
+                      <i class="fas fa-map-marker-alt"></i> ${u.Territory_Zone || u.Branch_Area || 'General'}
+                    </span>
+                  </td>
+
+                  <!-- Facility Access Permissions (Single-Window Control) -->
+                  <td>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Configure single-window facility permissions" style="font-size: 0.725rem; padding: 3px 8px; display: inline-flex; align-items: center; gap: 5px;">
+                      <i class="fas fa-shield-alt" style="color: var(--primary);"></i>
+                      <strong>${enabledFacilitiesCount}/${SYSTEM_FACILITIES.length}</strong> Facilities
+                    </button>
+                  </td>
+
+                  <!-- Status -->
+                  <td>
+                    <span class="badge ${u.Status === 'ACTIVE' ? 'badge-active' : (u.Status === 'ON_LEAVE' ? 'badge-pending' : 'badge-danger')}" style="font-size: 0.7rem;">
+                      ${u.Status || 'ACTIVE'}
+                    </span>
+                  </td>
+
+                  <!-- Aligned Uniform 32x32px Action Buttons -->
+                  <td style="text-align: right; white-space: nowrap;">
+                    <div style="display: inline-flex; align-items: center; gap: 6px;">
+                      
+                      <!-- 1. View 360° Profile -->
+                      <button class="btn btn-secondary btn-sm" onclick="openUserDetailsModal('${u.User_ID}')" title="View Full Employee Profile" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                        <i class="fas fa-eye"></i>
+                      </button>
+
+                      <!-- 2. Edit User Modal (Fixing issue #4!) -->
+                      ${isAdmin ? `
+                        <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.User_ID}')" title="Edit Employee Record & Permissions" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--warning);">
+                          <i class="fas fa-edit"></i>
+                        </button>
+                      ` : ''}
+
+                      <!-- 3. Quick Facility Rights -->
+                      ${isAdmin ? `
+                        <button class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Manage Module Permissions" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);">
+                          <i class="fas fa-sliders-h"></i>
+                        </button>
+                      ` : ''}
+
+                      <!-- 4. Toggle Status (Active / Inactive) -->
+                      ${isAdmin && !isSelf ? `
+                        <button class="btn btn-secondary btn-sm" onclick="toggleUserStatus('${u.User_ID}')" title="${u.Status === 'ACTIVE' ? 'Deactivate User' : 'Activate User'}" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: ${u.Status === 'ACTIVE' ? 'var(--danger)' : 'var(--success)'};">
+                          <i class="fas ${u.Status === 'ACTIVE' ? 'fa-user-slash' : 'fa-user-check'}"></i>
+                        </button>
+                      ` : ''}
+
+                      <!-- 5. Delete Employee -->
+                      ${isAdmin && !isSelf ? `
+                        <button class="btn btn-danger btn-sm" onclick="deleteUserRecord('${u.User_ID}')" title="Delete Employee Account" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      ` : ''}
+
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  window.clearUsersFilters = function() {
+    window.usersSearchQuery = "";
+    window.usersRoleFilter = "ALL";
+    window.usersStatusFilter = "ALL";
+    renderUsers();
+  };
+
+  /**
+   * Selection & Bulk Actions
+   */
+  window.toggleSelectAllUsers = function(checked) {
+    if (checked) {
+      const q = (window.usersSearchQuery || "").toLowerCase().trim();
+      const roleF = window.usersRoleFilter || "ALL";
+      const statusF = window.usersStatusFilter || "ALL";
+
+      window.selectedUserIds = (state.users || []).filter(u => {
+        const matchQ = !q || (
+          (u.Full_Name || "").toLowerCase().includes(q) ||
+          (u.User_ID || "").toLowerCase().includes(q) ||
+          (u.Department || "").toLowerCase().includes(q)
+        );
+        const matchRole = roleF === "ALL" || u.Role === roleF;
+        const matchStatus = statusF === "ALL" || (u.Status || "ACTIVE") === statusF;
+        return matchQ && matchRole && matchStatus;
+      }).map(u => u.User_ID);
+    } else {
+      window.selectedUserIds = [];
+    }
+    renderUsers();
+  };
+
+  window.toggleUserSelect = function(userId, checked) {
+    if (checked) {
+      if (!window.selectedUserIds.includes(userId)) window.selectedUserIds.push(userId);
+    } else {
+      window.selectedUserIds = window.selectedUserIds.filter(id => id !== userId);
+    }
+    renderUsers();
+  };
+
+  window.clearUserSelection = function() {
+    window.selectedUserIds = [];
+    renderUsers();
+  };
+
+  window.bulkSetUsersStatus = function(newStatus) {
+    if (!window.selectedUserIds || window.selectedUserIds.length === 0) return;
+    window.selectedUserIds.forEach(id => {
+      const u = (state.users || []).find(x => x.User_ID === id);
+      if (u) u.Status = newStatus;
+    });
+    showToast(`Updated status to ${newStatus} for ${window.selectedUserIds.length} users.`, "success");
+    window.selectedUserIds = [];
+    renderUsers();
+  };
+
+  window.bulkDeleteSelectedUsers = function() {
+    if (!window.selectedUserIds || window.selectedUserIds.length === 0) return;
+    const currentId = state.currentUser ? state.currentUser.User_ID : "";
+    if (window.selectedUserIds.includes(currentId)) {
+      showToast("You cannot delete your own logged-in admin account.", "error");
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete ${window.selectedUserIds.length} selected employee records? This action cannot be undone.`)) {
+      return;
+    }
+    state.users = (state.users || []).filter(u => !window.selectedUserIds.includes(u.User_ID));
+    showToast(`Deleted ${window.selectedUserIds.length} employees.`, "success");
+    window.selectedUserIds = [];
+    renderUsers();
+  };
+
+  /**
+   * =========================================================================
+   * 2. ADD & EDIT EMPLOYEE MODAL (REQUIREMENTS 1, 2, 3, 4)
+   * =========================================================================
+   */
+  function openNewUserModal() {
+    openUserFormModal(null);
+  }
+
+  function openEditUserModal(userId) {
+    openUserFormModal(userId);
+  }
+
+  function openUserFormModal(editUserId = null) {
+    const isEdit = Boolean(editUserId);
+    const existing = isEdit ? (state.users || []).find(u => u.User_ID === editUserId) : null;
+    const today = new Date().toISOString().split('T')[0];
+
+    const currentPhoto = existing ? (existing.Photo || "") : "";
+    const currentPerms = existing ? getUserPermissions(existing) : getDefaultPermissionsForRole("EXECUTIVE");
+    window._activeFormPerms = Object.assign({}, currentPerms);
+
     const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
     modal.innerHTML = `
       <div class="modal-overlay show" id="active-modal">
-        <div class="modal-container">
-          <div class="modal-header">
-            <h3 class="modal-title"><i class="fas fa-user-plus" style="color: var(--primary); margin-right: 0.5rem;"></i> Add New Employee</h3>
+        <div class="modal-container" style="max-width: 820px; width: 95vw; max-height: 92vh; display: flex; flex-direction: column;">
+          
+          <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+            <div>
+              <h3 class="modal-title" style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fas ${isEdit ? 'fa-user-edit' : 'fa-user-plus'}" style="color: var(--primary);"></i>
+                ${isEdit ? `Edit Employee Record: ${existing.Full_Name} (${existing.User_ID})` : 'Add New Employee to Team'}
+              </h3>
+              <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 2px;">
+                Configure personal details, DOJ, reporting hierarchy, and single-window facility permissions
+              </div>
+            </div>
             <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
           </div>
-          <form onsubmit="handleUserSubmit(event)">
-            <div class="modal-body">
-              <div class="form-group">
-                <label class="form-label">Full Name *</label>
-                <input type="text" class="form-control" id="u-name" required placeholder="e.g. Ramesh Sharma">
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group">
-                  <label class="form-label">Mobile Number *</label>
-                  <input type="tel" class="form-control" id="u-mobile" required placeholder="10-digit mobile">
+
+          <form onsubmit="handleUserFormSubmit(event, '${editUserId || ''}')" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+            <div class="modal-body" style="overflow-y: auto; padding: 1.25rem;">
+              
+              <!-- 1. Photo & Basic Info Banner -->
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                
+                <!-- Circular Photo Upload & Preview -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                  <div style="position: relative; width: 72px; height: 72px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); border: 2px solid var(--primary); box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="document.getElementById('u-photo-input').click()" title="Click to upload profile photo">
+                    <img id="u-photo-preview" src="${currentPhoto}" style="width: 100%; height: 100%; object-fit: cover; ${currentPhoto ? 'display: block;' : 'display: none;'}">
+                    <span id="u-photo-placeholder" style="color: #fff; font-size: 1.4rem; ${currentPhoto ? 'display: none;' : 'display: block;'}">
+                      <i class="fas fa-camera"></i>
+                    </span>
+                  </div>
+                  <input type="file" id="u-photo-input" accept="image/*" style="display: none;" onchange="handleUserPhotoSelect(this)">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); text-align: center;">
+                    <a href="javascript:void(0)" onclick="document.getElementById('u-photo-input').click()" style="color: var(--primary); font-weight: 600; text-decoration: none;">Upload Photo</a>
+                    ${currentPhoto ? ` | <a href="javascript:void(0)" onclick="removeUserFormPhoto()" style="color: var(--danger); text-decoration: none;">Remove</a>` : ''}
+                  </div>
                 </div>
-                <div class="form-group">
-                  <label class="form-label">Email ID</label>
-                  <input type="email" class="form-control" id="u-email" placeholder="name@company.com">
+
+                <!-- Primary Identity Details -->
+                <div style="flex: 1; min-width: 260px;">
+                  <div class="form-group" style="margin-bottom: 8px;">
+                    <label class="form-label" style="font-weight: 700;">Full Name *</label>
+                    <input type="text" class="form-control" id="u-name" required placeholder="e.g. Ramesh Patel" value="${existing ? (existing.Full_Name || '') : ''}">
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                      <label class="form-label" style="font-weight: 700;">Date of Joining (DOJ) *</label>
+                      <input type="date" class="form-control" id="u-doj" required value="${existing ? (existing.DOJ || today) : today}">
+                    </div>
+                    <div>
+                      <label class="form-label" style="font-weight: 700;">Account Status *</label>
+                      <select class="form-control" id="u-status" required>
+                        <option value="ACTIVE" ${existing && existing.Status === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+                        <option value="INACTIVE" ${existing && existing.Status === 'INACTIVE' ? 'selected' : ''}>INACTIVE</option>
+                        <option value="ON_LEAVE" ${existing && existing.Status === 'ON_LEAVE' ? 'selected' : ''}>ON LEAVE</option>
+                        <option value="SUSPENDED" ${existing && existing.Status === 'SUSPENDED' ? 'selected' : ''}>SUSPENDED</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
+
               </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group">
+
+              <!-- 2. Contact & Hierarchy Grid -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+                
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Primary Mobile No *</label>
+                  <input type="tel" class="form-control" id="u-mobile" required placeholder="10-digit mobile" value="${existing ? (existing.Mobile || '') : ''}">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Emergency / Alt Contact</label>
+                  <input type="tel" class="form-control" id="u-alt-phone" placeholder="Alternate phone" value="${existing ? (existing.Emergency_Contact || '') : ''}">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Official Email ID</label>
+                  <input type="email" class="form-control" id="u-email" placeholder="employee@company.com" value="${existing ? (existing.Email || '') : ''}">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Assigned Territory / Zone *</label>
+                  <select class="form-control" id="u-zone" required>
+                    ${(state.masters.territoryZones || ["North Zone", "South Zone", "East Zone", "West Zone", "Central Zone", "GIDC Industrial Zone", "Metro Central"]).map(z => `
+                      <option value="${z}" ${existing && (existing.Territory_Zone === z || existing.Branch_Area === z) ? 'selected' : ''}>${z}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label">Department *</label>
                   <select class="form-control" id="u-dept" required>
-                    ${state.masters.departments.map(d => `<option value="${d}">${d}</option>`).join('')}
+                    ${(state.masters.departments || ["Sales & Marketing", "Field Operations", "Customer Support", "Accounts & Finance", "Warehouse & Dispatch", "Management"]).map(d => `
+                      <option value="${d}" ${existing && existing.Department === d ? 'selected' : ''}>${d}</option>
+                    `).join('')}
                   </select>
                 </div>
-                <div class="form-group">
+
+                <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label">Designation *</label>
                   <select class="form-control" id="u-desig" required>
-                    ${state.masters.designations.map(d => `<option value="${d}">${d}</option>`).join('')}
+                    ${(state.masters.designations || ["Area Sales Manager", "Sr. Field Executive", "Field Executive", "Service Technician", "Accounts Officer", "Operations Lead", "Director"]).map(d => `
+                      <option value="${d}" ${existing && existing.Designation === d ? 'selected' : ''}>${d}</option>
+                    `).join('')}
                   </select>
                 </div>
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group">
-                  <label class="form-label">Role Access *</label>
-                  <select class="form-control" id="u-role" required>
-                    ${state.masters.roles.map(r => `<option value="${r}">${r}</option>`).join('')}
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Role Access Level *</label>
+                  <select class="form-control" id="u-role" required onchange="handleUserRolePresetChange(this.value)">
+                    ${(state.masters.roles || ["ADMIN", "MANAGER", "EXECUTIVE", "ACCOUNTS"]).map(r => `
+                      <option value="${r}" ${existing && existing.Role === r ? 'selected' : ''}>${r}</option>
+                    `).join('')}
                   </select>
                 </div>
-                <div class="form-group">
+
+                <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label">Reporting Manager</label>
                   <select class="form-control" id="u-manager">
-                    <option value="">-- Select Manager --</option>
-                    ${state.users.filter(u => u.Role === 'ADMIN' || u.Role === 'MANAGER').map(u => `<option value="${u.User_ID}">${u.Full_Name} (${u.Designation})</option>`).join('')}
+                    <option value="">-- No Direct Manager --</option>
+                    ${(state.users || []).filter(u => (!existing || u.User_ID !== existing.User_ID) && (u.Role === 'ADMIN' || u.Role === 'MANAGER')).map(u => `
+                      <option value="${u.User_ID}" ${existing && existing.Manager_ID === u.User_ID ? 'selected' : ''}>${u.Full_Name} (${u.Role} - ${u.Designation})</option>
+                    `).join('')}
                   </select>
                 </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Daily Conveyance / Travel Rate (₹/day)</label>
+                  <input type="number" class="form-control" id="u-da-rate" placeholder="e.g. 350" value="${existing ? (existing.Daily_Allowance_Rate || 350) : 350}">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Employee ID</label>
+                  <input type="text" class="form-control" id="u-custom-id" placeholder="Auto-generated if empty" value="${existing ? existing.User_ID : ''}" ${isEdit ? 'readonly style="background:var(--bg-primary);"' : ''}>
+                </div>
+
               </div>
+
+              <!-- 3. SINGLE WINDOW FACILITY ACCESS CONTROL & CRUD PERMISSIONS (REQUIREMENT 2) -->
+              <div style="background: var(--bg-primary); border: 1.5px solid var(--border-color); border-radius: 8px; padding: 14px; margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                      <i class="fas fa-sliders-h" style="color: var(--primary);"></i> Single-Window Facility Permissions & CRUD Control
+                    </h4>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                      Authorize or revoke individual application modules for this employee account
+                    </div>
+                  </div>
+
+                  <!-- Quick Action Buttons: Select All / Deselect All / Presets -->
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAllFormFacilities(true)" style="font-size: 0.75rem; padding: 3px 8px; font-weight: 600;">
+                      <i class="fas fa-check-double" style="color: var(--success);"></i> Select All
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAllFormFacilities(false)" style="font-size: 0.75rem; padding: 3px 8px;">
+                      <i class="fas fa-times" style="color: var(--danger);"></i> Deselect All
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 12 Facility Checkbox Tiles Grid -->
+                <div id="u-facilities-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;">
+                  ${renderFacilityCheckboxesHtml(window._activeFormPerms)}
+                </div>
+              </div>
+
             </div>
-            <div class="modal-footer">
+
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color); justify-content: space-between;">
               <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-              <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Create User</button>
+              <button type="submit" class="btn btn-primary" style="font-weight: 700;">
+                <i class="fas fa-check"></i> ${isEdit ? 'Save Employee Changes' : 'Create Employee Account'}
+              </button>
             </div>
           </form>
+
         </div>
       </div>
     `;
   }
 
-  function handleUserSubmit(e) {
-    e.preventDefault();
-    const mgrId = document.getElementById("u-manager").value;
-    const mgr = state.users.find(u => u.User_ID === mgrId);
-
-    const newUser = {
-      User_ID: "USR-" + (100 + state.users.length + 1),
-      Full_Name: document.getElementById("u-name").value.trim(),
-      DOJ: new Date().toISOString().split('T')[0],
-      Mobile: document.getElementById("u-mobile").value.trim(),
-      Email: document.getElementById("u-email").value.trim(),
-      Department: document.getElementById("u-dept").value,
-      Designation: document.getElementById("u-desig").value,
-      Manager_ID: mgrId,
-      Manager_Name: mgr ? mgr.Full_Name : "-",
-      Role: document.getElementById("u-role").value,
-      Status: "ACTIVE"
-    };
-
-    state.users.push(newUser);
-    closeModal();
-    renderView(state.currentView);
-    showToast(`User ${newUser.Full_Name} added successfully!`, "success");
+  function renderFacilityCheckboxesHtml(permsObj) {
+    return SYSTEM_FACILITIES.map(fac => {
+      const isChecked = Boolean(permsObj[fac.id]);
+      return `
+        <label style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: all 0.15s; ${isChecked ? 'border-color: var(--primary); background: rgba(15, 118, 110, 0.04);' : ''}">
+          <input type="checkbox" id="fac-${fac.id}" ${isChecked ? 'checked' : ''} onchange="window._activeFormPerms['${fac.id}'] = this.checked; renderFacilityCheckboxesDom();" style="margin-top: 3px; accent-color: var(--primary);">
+          <div style="flex: 1; overflow: hidden;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 5px;">
+              <i class="${fac.icon}" style="color: var(--primary); font-size: 0.75rem;"></i>
+              <span>${fac.label}</span>
+            </div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); line-height: 1.25; margin-top: 2px;">
+              ${fac.desc}
+            </div>
+          </div>
+        </label>
+      `;
+    }).join('');
   }
 
-  // 7. CHECK-IN / CHECK-OUT MODALS
+  window.renderFacilityCheckboxesDom = function() {
+    const grid = document.getElementById("u-facilities-grid");
+    if (grid) grid.innerHTML = renderFacilityCheckboxesHtml(window._activeFormPerms);
+  };
 
+  window.toggleAllFormFacilities = function(enableAll) {
+    SYSTEM_FACILITIES.forEach(f => {
+      window._activeFormPerms[f.id] = Boolean(enableAll);
+    });
+    renderFacilityCheckboxesDom();
+    showToast(enableAll ? "All facilities selected" : "All facilities deselected", "info");
+  };
+
+  window.handleUserRolePresetChange = function(newRole) {
+    const defaults = getDefaultPermissionsForRole(newRole);
+    window._activeFormPerms = Object.assign({}, defaults);
+    renderFacilityCheckboxesDom();
+    showToast(`Loaded default facility permissions for ${newRole}`, "info");
+  };
+
+  window.handleUserPhotoSelect = function(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      window._tempSelectedPhoto = e.target.result;
+      const img = document.getElementById("u-photo-preview");
+      const icon = document.getElementById("u-photo-placeholder");
+      if (img) {
+        img.src = e.target.result;
+        img.style.display = "block";
+      }
+      if (icon) icon.style.display = "none";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.removeUserFormPhoto = function() {
+    window._tempSelectedPhoto = "";
+    const img = document.getElementById("u-photo-preview");
+    const icon = document.getElementById("u-photo-placeholder");
+    if (img) {
+      img.src = "";
+      img.style.display = "none";
+    }
+    if (icon) icon.style.display = "block";
+  };
+
+  /**
+   * Handle Submit for Add/Edit Employee Form
+   */
+  window.handleUserFormSubmit = function(e, editUserId) {
+    e.preventDefault();
+    const name = document.getElementById("u-name").value.trim();
+    const doj = document.getElementById("u-doj").value;
+    const status = document.getElementById("u-status").value;
+    const mobile = document.getElementById("u-mobile").value.trim();
+    const altPhone = document.getElementById("u-alt-phone").value.trim();
+    const email = document.getElementById("u-email").value.trim();
+    const zone = document.getElementById("u-zone").value;
+    const dept = document.getElementById("u-dept").value;
+    const desig = document.getElementById("u-desig").value;
+    const role = document.getElementById("u-role").value;
+    const mgrId = document.getElementById("u-manager").value;
+    const daRate = Number(document.getElementById("u-da-rate").value) || 350;
+    const customId = document.getElementById("u-custom-id") ? document.getElementById("u-custom-id").value.trim() : "";
+
+    const mgr = (state.users || []).find(u => u.User_ID === mgrId);
+    const mgrName = mgr ? mgr.Full_Name : "-";
+
+    const previewImg = document.getElementById("u-photo-preview");
+    let photo = (previewImg && previewImg.src && previewImg.src.startsWith('data:image')) ? previewImg.src : (window._tempSelectedPhoto || "");
+
+    const isEdit = Boolean(editUserId);
+    const userId = isEdit ? editUserId : (customId || ("USR-" + (100 + (state.users || []).length + 1)));
+
+    // Permissions
+    const perms = Object.assign({}, window._activeFormPerms);
+
+    if (isEdit) {
+      const u = (state.users || []).find(x => x.User_ID === editUserId);
+      if (u) {
+        u.Full_Name = name;
+        u.DOJ = doj;
+        u.Status = status;
+        u.Mobile = mobile;
+        u.Emergency_Contact = altPhone;
+        u.Email = email;
+        u.Territory_Zone = zone;
+        u.Branch_Area = zone;
+        u.Department = dept;
+        u.Designation = desig;
+        u.Role = role;
+        u.Manager_ID = mgrId;
+        u.Manager_Name = mgrName;
+        u.Daily_Allowance_Rate = daRate;
+        u.Permissions = perms;
+        if (photo !== undefined && (photo.startsWith('data:image') || photo === "")) {
+          u.Photo = photo;
+        }
+
+        // If editing the current user, update session profile and avatars
+        if (state.currentUser && state.currentUser.User_ID === editUserId) {
+          state.currentUser.Full_Name = name;
+          state.currentUser.Role = role;
+          state.currentUser.Department = dept;
+          state.currentUser.Designation = desig;
+          state.currentUser.Photo = u.Photo;
+          if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
+        }
+
+        showToast(`Employee ${u.Full_Name} updated successfully!`, "success");
+        if (typeof syncRecordToBackend === 'function') {
+          syncRecordToBackend('save_user', u);
+        }
+      }
+    } else {
+      const newUser = {
+        User_ID: userId,
+        Full_Name: name,
+        DOJ: doj,
+        Status: status,
+        Mobile: mobile,
+        Emergency_Contact: altPhone,
+        Email: email,
+        Territory_Zone: zone,
+        Branch_Area: zone,
+        Department: dept,
+        Designation: desig,
+        Role: role,
+        Manager_ID: mgrId,
+        Manager_Name: mgrName,
+        Daily_Allowance_Rate: daRate,
+        Photo: photo,
+        Permissions: perms
+      };
+
+      state.users.push(newUser);
+      showToast(`New employee ${name} added successfully!`, "success");
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_user', newUser);
+      }
+    }
+
+    closeModal();
+    renderUsers();
+  };
+
+  /**
+   * =========================================================================
+   * 3. QUICK FACILITY ACCESS MATRIX MODAL
+   * =========================================================================
+   */
+  window.openUserFacilitiesModal = function(userId) {
+    const u = (state.users || []).find(x => x.User_ID === userId);
+    if (!u) return;
+
+    window._tempUserModalPerms = Object.assign({}, getUserPermissions(u));
+
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 680px; width: 95vw;">
+          <div class="modal-header">
+            <div>
+              <h3 class="modal-title" style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-shield-alt" style="color: var(--primary);"></i> Facility Rights: ${u.Full_Name}
+              </h3>
+              <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 2px;">
+                Role: <strong>${u.Role}</strong> • ${u.Department} • ${u.User_ID}
+              </div>
+            </div>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="modal-body" style="padding: 1.25rem;">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-main);">Module Access Checkboxes:</span>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleQuickUserFacilities(true)" style="font-size: 0.75rem; padding: 2px 8px;">
+                  <i class="fas fa-check-double"></i> Select All
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleQuickUserFacilities(false)" style="font-size: 0.75rem; padding: 2px 8px;">
+                  <i class="fas fa-times"></i> Deselect All
+                </button>
+              </div>
+            </div>
+
+            <div id="quick-fac-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 380px; overflow-y: auto;">
+              ${renderQuickFacilitiesCheckboxesHtml(window._tempUserModalPerms)}
+            </div>
+
+          </div>
+
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveQuickUserFacilities('${userId}')">
+              <i class="fas fa-check"></i> Save Permissions
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  function renderQuickFacilitiesCheckboxesHtml(permsObj) {
+    return SYSTEM_FACILITIES.map(fac => {
+      const isChecked = Boolean(permsObj[fac.id]);
+      return `
+        <label style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; ${isChecked ? 'background: rgba(15, 118, 110, 0.08); border-color: var(--primary);' : ''}">
+          <input type="checkbox" id="qfac-${fac.id}" ${isChecked ? 'checked' : ''} onchange="window._tempUserModalPerms['${fac.id}'] = this.checked;" style="accent-color: var(--primary);">
+          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+            <i class="${fac.icon}" style="color: var(--primary); font-size: 0.8rem;"></i>
+            <span>${fac.label}</span>
+          </div>
+        </label>
+      `;
+    }).join('');
+  }
+
+  window.toggleQuickUserFacilities = function(enableAll) {
+    SYSTEM_FACILITIES.forEach(f => {
+      window._tempUserModalPerms[f.id] = Boolean(enableAll);
+      const chk = document.getElementById("qfac-" + f.id);
+      if (chk) chk.checked = Boolean(enableAll);
+    });
+  };
+
+  window.saveQuickUserFacilities = function(userId) {
+    const u = (state.users || []).find(x => x.User_ID === userId);
+    if (u) {
+      u.Permissions = Object.assign({}, window._tempUserModalPerms);
+      showToast(`Updated facility permissions for ${u.Full_Name}.`, "success");
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_user', u);
+      }
+    }
+    closeModal();
+    renderUsers();
+  };
+
+  /**
+   * =========================================================================
+   * 4. EMPLOYEE 360° PROFILE VIEW MODAL
+   * =========================================================================
+   */
+  window.openUserDetailsModal = function(userId) {
+    const u = (state.users || []).find(x => x.User_ID === userId);
+    if (!u) return;
+
+    const perms = getUserPermissions(u);
+    const initials = (u.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
+
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 620px; width: 95vw;">
+          <div class="modal-header">
+            <h3 class="modal-title" style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+              <i class="fas fa-id-card" style="color: var(--primary);"></i> Staff Profile: ${u.Full_Name}
+            </h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="modal-body" style="padding: 1.25rem;">
+            
+            <!-- Profile Banner with Photo -->
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 16px;">
+              <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 1.2rem; border: 2px solid var(--primary); flex-shrink: 0;">
+                ${u.Photo ? `<img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">` : initials}
+              </div>
+              <div style="flex: 1;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                  <div>
+                    <h4 style="margin: 0; font-size: 1.1rem; color: var(--text-main);">${u.Full_Name}</h4>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">${u.User_ID} • ${u.Designation || 'Field Representative'}</div>
+                  </div>
+                  <span class="badge ${u.Status === 'ACTIVE' ? 'badge-active' : 'badge-danger'}">${u.Status || 'ACTIVE'}</span>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 6px;">
+                  <span class="badge badge-on-hold" style="font-size: 0.7rem;">${u.Role}</span>
+                  <span class="badge badge-secondary" style="font-size: 0.7rem;">${u.Department || 'Operations'}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Details Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; font-size: 0.85rem;">
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Date of Joining (DOJ)</div>
+                <strong>${u.DOJ || '-'}</strong>
+              </div>
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Primary Mobile</div>
+                <strong>${u.Mobile || '-'}</strong>
+              </div>
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Official Email</div>
+                <strong>${u.Email || '-'}</strong>
+              </div>
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Reporting Manager</div>
+                <strong>${u.Manager_Name || '-'}</strong>
+              </div>
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Territory Zone</div>
+                <strong>${u.Territory_Zone || u.Branch_Area || 'General'}</strong>
+              </div>
+              <div style="padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Daily DA Rate</div>
+                <strong>₹${u.Daily_Allowance_Rate || 350}/day</strong>
+              </div>
+            </div>
+
+            <!-- Authorized Facilities Chips -->
+            <div>
+              <div style="font-size: 0.775rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Authorized Application Facilities</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                ${SYSTEM_FACILITIES.map(f => {
+                  const hasAccess = Boolean(perms[f.id]);
+                  return `
+                    <span class="badge ${hasAccess ? 'badge-active' : 'badge-secondary'}" style="font-size: 0.7rem; opacity: ${hasAccess ? 1 : 0.4};">
+                      <i class="${f.icon}"></i> ${f.label}
+                    </span>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+          </div>
+
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button type="button" class="btn btn-primary" onclick="closeModal(); openEditUserModal('${u.User_ID}')">
+              <i class="fas fa-edit"></i> Edit Record
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  /**
+   * =========================================================================
+   * 5. CURRENT USER PROFILE MODAL (REQUIREMENT 3: CLICK HEADER AVATAR)
+   * =========================================================================
+   */
+  window.openCurrentUserProfileModal = function() {
+    const cur = state.currentUser || { Role: "EXECUTIVE", User_ID: "USR-102", Full_Name: "Amit Patel" };
+    const matching = (state.users || []).find(u => u.User_ID === cur.User_ID) || cur;
+    const currentPhoto = matching.Photo || cur.Photo || "";
+    const initials = (cur.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
+
+    const modal = document.getElementById("modal-container");
+    if (!modal) return;
+
+    modal.innerHTML = `
+      <div class="modal-overlay show" id="active-modal">
+        <div class="modal-container" style="max-width: 500px; width: 95vw;">
+          <div class="modal-header">
+            <h3 class="modal-title" style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+              <i class="fas fa-user-circle" style="color: var(--primary);"></i> Your User Profile & Avatar
+            </h3>
+            <button class="btn-logout" onclick="closeModal()"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="modal-body" style="padding: 1.25rem;">
+            
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 16px;">
+              <div style="position: relative; width: 88px; height: 88px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); border: 2.5px solid var(--primary); box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; cursor: pointer;" onclick="document.getElementById('cur-photo-input').click()" title="Click to change your profile image">
+                <img id="cur-photo-preview" src="${currentPhoto}" style="width: 100%; height: 100%; object-fit: cover; ${currentPhoto ? 'display: block;' : 'display: none;'}">
+                <span id="cur-photo-placeholder" style="color: #fff; font-size: 1.8rem; ${currentPhoto ? 'display: none;' : 'display: block;'}">
+                  ${initials}
+                </span>
+              </div>
+              <input type="file" id="cur-photo-input" accept="image/*" style="display: none;" onchange="handleCurrentProfilePhotoSelect(this)">
+              <div style="font-size: 0.8rem;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('cur-photo-input').click()">
+                  <i class="fas fa-camera"></i> Change Photo
+                </button>
+                ${currentPhoto ? `
+                  <button type="button" class="btn btn-danger btn-sm" onclick="removeCurrentProfilePhoto()" style="margin-left: 6px;">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+
+            <div style="background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); padding: 12px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px;">
+                <span style="color: var(--text-muted);">Employee Name:</span>
+                <strong>${cur.Full_Name}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px;">
+                <span style="color: var(--text-muted);">User ID:</span>
+                <strong>${cur.User_ID}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px;">
+                <span style="color: var(--text-muted);">Current Role:</span>
+                <span class="badge badge-active">${cur.Role}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                <span style="color: var(--text-muted);">Designation:</span>
+                <strong>${cur.Designation || matching.Designation || 'Field Representative'}</strong>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            <button type="button" class="btn btn-primary" onclick="saveCurrentProfilePhoto()">
+              <i class="fas fa-check"></i> Update Profile Image
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  window.handleCurrentProfilePhotoSelect = function(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      window._tempCurPhoto = e.target.result;
+      const img = document.getElementById("cur-photo-preview");
+      const icon = document.getElementById("cur-photo-placeholder");
+      if (img) {
+        img.src = e.target.result;
+        img.style.display = "block";
+      }
+      if (icon) icon.style.display = "none";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.removeCurrentProfilePhoto = function() {
+    window._tempCurPhoto = "";
+    const img = document.getElementById("cur-photo-preview");
+    const icon = document.getElementById("cur-photo-placeholder");
+    if (img) {
+      img.src = "";
+      img.style.display = "none";
+    }
+    if (icon) icon.style.display = "block";
+  };
+
+  window.saveCurrentProfilePhoto = function() {
+    const cur = state.currentUser;
+    if (!cur) return;
+    const img = document.getElementById("cur-photo-preview");
+    const photo = (img && img.src && img.src.startsWith('data:image')) ? img.src : (window._tempCurPhoto || "");
+
+    cur.Photo = photo;
+    const matching = (state.users || []).find(u => u.User_ID === cur.User_ID);
+    if (matching) {
+      matching.Photo = photo;
+      if (typeof syncRecordToBackend === 'function') {
+        syncRecordToBackend('save_user', matching);
+      }
+    }
+
+    if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
+    closeModal();
+    showToast("Profile image updated successfully!", "success");
+    renderUsers();
+  };
+
+  /**
+   * Status Toggle & Delete
+   */
+  window.toggleUserStatus = function(userId) {
+    const u = (state.users || []).find(x => x.User_ID === userId);
+    if (!u) return;
+    const newStatus = u.Status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    u.Status = newStatus;
+    showToast(`Employee ${u.Full_Name} marked as ${newStatus}.`, "info");
+    if (typeof syncRecordToBackend === 'function') {
+      syncRecordToBackend('save_user', u);
+    }
+    renderUsers();
+  };
+
+  window.deleteUserRecord = function(userId) {
+    const u = (state.users || []).find(x => x.User_ID === userId);
+    if (!u) return;
+    if (!confirm(`Are you sure you want to delete employee record for ${u.Full_Name} (${u.User_ID})?`)) return;
+
+    state.users = (state.users || []).filter(x => x.User_ID !== userId);
+    showToast(`Employee ${u.Full_Name} removed from system.`, "success");
+    renderUsers();
+  };
+
+  /**
+   * Export Users Directory to CSV
+   */
+  window.exportUsersToCsv = function() {
+    const users = state.users || [];
+    if (users.length === 0) {
+      showToast("No employee records to export.", "warning");
+      return;
+    }
+
+    const headers = ["User ID", "Full Name", "DOJ", "Status", "Mobile", "Email", "Department", "Designation", "Role", "Manager", "Territory Zone", "Daily Allowance (₹)"];
+    const lines = [headers.map(h => `"${h}"`).join(',')];
+
+    users.forEach(u => {
+      const row = [
+        u.User_ID || '',
+        u.Full_Name || '',
+        u.DOJ || '',
+        u.Status || 'ACTIVE',
+        u.Mobile || '',
+        u.Email || '',
+        u.Department || '',
+        u.Designation || '',
+        u.Role || '',
+        u.Manager_Name || '',
+        u.Territory_Zone || u.Branch_Area || '',
+        u.Daily_Allowance_Rate || 350
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+      lines.push(row.join(','));
+    });
+
+    const csvContent = '\uFEFF' + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const filename = `Nexallot_Staff_Directory_${new Date().toISOString().split('T')[0]}.csv`;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast("Staff directory exported successfully as CSV!", "success");
+  };
+
+  // Global Exports
   window.renderUsers = renderUsers;
   window.openNewUserModal = openNewUserModal;
-  window.handleUserSubmit = handleUserSubmit;
+  window.openEditUserModal = openEditUserModal;
+  window.openUserDetailsModal = openUserDetailsModal;
+  window.openUserFacilitiesModal = openUserFacilitiesModal;
+  window.openCurrentUserProfileModal = openCurrentUserProfileModal;
 })();
 </script>
   <script>
@@ -14290,6 +15423,7 @@ window.openNewClientModal = window.openClientModal;
       try {
         if (typeof checkAndRenderAuth === 'function') checkAndRenderAuth();
         if (typeof loadSavedMasters === 'function') loadSavedMasters();
+        if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
         if (typeof updateActiveVisitPill === 'function') updateActiveVisitPill();
         if (typeof updateHeaderMeta === 'function') updateHeaderMeta(state.currentView || 'dashboard');
         console.log("✅ Nexallot Application Initialized Successfully.");
