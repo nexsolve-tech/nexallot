@@ -2236,13 +2236,14 @@ h1, h2, h3, h4, h5, h6 {
       Branch_Area: "North Zone"
     },
     company: {
-      name: localStorage.getItem("nexallot_company_name") || "Apex Global Enterprises",
-      email: localStorage.getItem("nexallot_company_email") || "orders@apexglobal.com",
+      name: localStorage.getItem("nexallot_company_name") || "Nexsolve Enterprise",
+      email: localStorage.getItem("nexallot_company_email") || "orders@nexsolve.in",
       gstin: localStorage.getItem("nexallot_company_gstin") || "08AAACA1234A1Z5", // Dynamic: 08 for Rajasthan, 24 for Gujarat, etc.
       state: localStorage.getItem("nexallot_company_state") || "Rajasthan",
       stateCode: localStorage.getItem("nexallot_company_state_code") || "08",
       phone: localStorage.getItem("nexallot_company_phone") || "+91 98765 43210",
       address: localStorage.getItem("nexallot_company_address") || "Industrial Estate, Phase 1",
+      logo: localStorage.getItem("nexallot_company_logo") || "",
       licenseKey: "FF-2026-X892-PRO",
       expiryDate: "2027-09-30",
       maxUsers: 150
@@ -4051,9 +4052,15 @@ h1, h2, h3, h4, h5, h6 {
       document.body.appendChild(overlay);
     }
     const currentOrg = getActiveOrgCode();
+    const compLogo = (state.company && state.company.logo) || localStorage.getItem("nexallot_company_logo") || "";
     overlay.innerHTML = `
       <div class="login-card">
         <div class="login-brand-header">
+          <div id="login-client-logo-wrap" style="${compLogo ? 'display: flex;' : 'display: none;'} justify-content: center; margin-bottom: 14px;">
+            <div style="background: #ffffff; padding: 6px 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); display: inline-flex; align-items: center; justify-content: center; min-height: 48px; max-width: 220px;">
+              <img id="login-client-logo-img" src="${compLogo || ''}" alt="Company Logo" style="max-height: 42px; max-width: 190px; object-fit: contain; display: block;">
+            </div>
+          </div>
           <div class="login-brand-badge">
             <i class="fas fa-cubes"></i> Field Operations Suite
           </div>
@@ -4111,6 +4118,37 @@ h1, h2, h3, h4, h5, h6 {
     overlay.style.display = "flex";
   }
   window.showLoginOverlay = showLoginOverlay;
+
+  function updateCompanyLogoUI(logoDataUrl) {
+    const logo = (logoDataUrl !== undefined) ? logoDataUrl : ((state.company && state.company.logo) || localStorage.getItem("nexallot_company_logo") || "");
+    
+    // 1. Sidebar Top-Left Header Brand beside application name
+    const headerLogoWrapper = document.getElementById("header-company-logo-wrapper");
+    const headerLogoImg = document.getElementById("header-company-logo");
+    if (headerLogoWrapper && headerLogoImg) {
+      if (logo) {
+        headerLogoImg.src = logo;
+        headerLogoWrapper.style.display = "inline-flex";
+      } else {
+        headerLogoWrapper.style.display = "none";
+        headerLogoImg.src = "";
+      }
+    }
+
+    // 2. Login screen overlay
+    const loginLogoWrap = document.getElementById("login-client-logo-wrap");
+    const loginLogoImg = document.getElementById("login-client-logo-img");
+    if (loginLogoWrap && loginLogoImg) {
+      if (logo) {
+        loginLogoImg.src = logo;
+        loginLogoWrap.style.display = "flex";
+      } else {
+        loginLogoWrap.style.display = "none";
+        loginLogoImg.src = "";
+      }
+    }
+  }
+  window.updateCompanyLogoUI = updateCompanyLogoUI;
 
   function hideLoginOverlay() {
     const overlay = document.getElementById("login-screen-overlay");
@@ -7559,14 +7597,82 @@ h1, h2, h3, h4, h5, h6 {
 </script>
   <script>
 (function() {
-    function renderPayments(container) {
-    const filterQuery = (state.filters.payments || "").toLowerCase();
-    const filteredPayments = state.payments.filter(p => 
-      p.Payment_ID.toLowerCase().includes(filterQuery) ||
-      getClientName(p.Client_ID).toLowerCase().includes(filterQuery) ||
-      (p.Order_ID || "").toLowerCase().includes(filterQuery) ||
-      p.Payment_Mode.toLowerCase().includes(filterQuery)
-    );
+  function getFilteredPayments(query) {
+    const q = (query !== undefined ? query : (state.filters.payments || "")).toLowerCase().trim();
+    return (state.payments || []).filter(p => {
+      const pId = String(p.Payment_ID || "").toLowerCase();
+      const cName = String(getClientName(p.Client_ID) || "").toLowerCase();
+      const oId = String(p.Order_ID || "").toLowerCase();
+      const mode = String(p.Payment_Mode || "").toLowerCase();
+      const ref = String(p.Ref_Cheque_No || "").toLowerCase();
+      const uName = String(getUserName(p.User_ID) || "").toLowerCase();
+      const status = String(p.Status || "").toLowerCase();
+      return !q || pId.includes(q) || cName.includes(q) || oId.includes(q) || mode.includes(q) || ref.includes(q) || uName.includes(q) || status.includes(q);
+    });
+  }
+
+  function renderPaymentTableRows(filteredPayments) {
+    if (!filteredPayments || filteredPayments.length === 0) {
+      return `<tr><td colspan="8" style="text-align: center; padding: 28px; color: var(--text-muted); font-size: 0.9rem;">No payment collection receipts found matching your criteria.</td></tr>`;
+    }
+
+    return filteredPayments.map(p => `
+      <tr>
+        <td><strong>${p.Payment_ID}</strong></td>
+        <td style="white-space: nowrap;">${p.Date}</td>
+        <td><strong>${getClientName(p.Client_ID)}</strong></td>
+        <td>
+          ${p.Is_Advance || p.Payment_Type === 'ADVANCE_ON_ACCOUNT' || p.Order_ID === 'General On-Account' || !p.Order_ID 
+            ? `<span class="badge badge-info" style="font-size:0.75rem;"><i class="fas fa-coins"></i> Advance / On-Account</span>` 
+            : `<span class="badge badge-active" style="font-size:0.75rem;"><i class="fas fa-receipt"></i> ${p.Order_ID}</span>`}
+        </td>
+        <td>
+          <strong style="color: var(--success); font-size: 0.95rem;">₹${Number(p.Amount).toLocaleString()}</strong>
+          ${p.Payment_Mode ? `<div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 2px;">${p.Payment_Mode}${p.Ref_Cheque_No ? ' • ' + p.Ref_Cheque_No : ''}</div>` : ''}
+        </td>
+        <td>${getUserName(p.User_ID)}</td>
+        <td>
+          <div style="display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="badge ${p.Status === 'BOUNCED' ? 'badge-danger' : (p.Status === 'PENDING' ? 'badge-pending' : 'badge-active')}" style="font-size: 0.75rem;">
+              ${p.Status || 'RECEIVED'}
+            </span>
+            ${p.Attachment ? `
+              <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.725rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 4px;" onclick="openAttachmentViewer('PAYMENT', '${p.Payment_ID}')" title="View Uploaded Payment Proof">
+                <i class="fas fa-paperclip" style="color: var(--primary);"></i>
+                <span>Proof</span>
+              </button>
+            ` : `
+              <span style="font-size: 0.7rem; color: var(--text-muted);">-</span>
+            `}
+          </div>
+        </td>
+        <td style="text-align: right; white-space: nowrap;">
+          <button type="button" class="action-dropdown-btn" onclick="openPaymentActionMenu(this, '${p.Payment_ID}', '${p.Client_ID}', ${p.Attachment ? 'true' : 'false'}, event)" title="Click to view payment actions">
+            <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+            <span>Actions</span>
+            <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  }
+  window.renderPaymentTableRows = renderPaymentTableRows;
+
+  function filterPaymentsTable(query) {
+    state.filters.payments = query || "";
+    const filtered = getFilteredPayments(query);
+    const tbody = document.getElementById("payments-table-tbody");
+    const countEl = document.getElementById("payments-count-showing");
+    if (tbody) tbody.innerHTML = renderPaymentTableRows(filtered);
+    if (countEl) countEl.textContent = filtered.length;
+  }
+  window.filterPaymentsTable = filterPaymentsTable;
+
+  function renderPayments(container) {
+    if (!container) container = document.getElementById("app-content");
+    if (!container) return;
+
+    const filteredPayments = getFilteredPayments(state.filters.payments);
 
     container.innerHTML = `
       <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.25rem;">
@@ -7577,9 +7683,9 @@ h1, h2, h3, h4, h5, h6 {
       <div class="tab-filter-bar">
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 350px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" class="form-control" placeholder="Search Receipt ID, Client, Order No..." value="${state.filters.payments}" oninput="state.filters.payments = this.value; renderPayments(document.getElementById('app-content'))">
+          <input type="text" class="form-control" placeholder="Search Receipt ID, Client, Order No..." value="${state.filters.payments || ''}" oninput="filterPaymentsTable(this.value)">
         </div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong>${filteredPayments.length}</strong> of ${state.payments.length} receipts</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Showing <strong id="payments-count-showing">${filteredPayments.length}</strong> of ${(state.payments || []).length} receipts</div>
       </div>
 
       <div class="table-wrapper">
@@ -7591,47 +7697,19 @@ h1, h2, h3, h4, h5, h6 {
               <th>Client</th>
               <th>Order Ref No</th>
               <th>Amount Collected</th>
-              <th>Payment Mode</th>
-              <th>Ref / Cheque No</th>
               <th>Collected By</th>
-              <th>Status</th>
-              <th>Attachment</th>
-              <th>Action</th>
+              <th>Status & Attachment</th>
+              <th style="min-width: 100px; text-align: right;">Action</th>
             </tr>
           </thead>
-          <tbody>
-            ${filteredPayments.map(p => `
-              <tr>
-                <td><strong>${p.Payment_ID}</strong></td>
-                <td>${p.Date}</td>
-                <td><strong>${getClientName(p.Client_ID)}</strong></td>
-                <td>
-                  ${p.Is_Advance || p.Payment_Type === 'ADVANCE_ON_ACCOUNT' || p.Order_ID === 'General On-Account' || !p.Order_ID 
-                    ? `<span class="badge badge-info" style="font-size:0.75rem;"><i class="fas fa-coins"></i> Advance / On-Account</span>` 
-                    : `<span class="badge badge-active" style="font-size:0.75rem;"><i class="fas fa-receipt"></i> ${p.Order_ID}</span>`}
-                </td>
-                <td><strong style="color: var(--success); font-size: 0.95rem;">₹${Number(p.Amount).toLocaleString()}</strong></td>
-                <td><span class="badge badge-on-hold">${p.Payment_Mode}</span></td>
-                <td>${p.Ref_Cheque_No || '-'}</td>
-                <td>${getUserName(p.User_ID)}</td>
-                <td><span class="badge badge-active">${p.Status}</span></td>
-                <td>
-                  ${p.Attachment ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:0.75rem; padding: 2px 8px;" onclick="openAttachmentViewer('PAYMENT', '${p.Payment_ID}')"><i class="fas fa-paperclip"></i> View</button>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
-                </td>
-                <td>
-                  <button type="button" class="action-dropdown-btn" onclick="openPaymentActionMenu(this, '${p.Payment_ID}', '${p.Client_ID}', ${p.Attachment ? 'true' : 'false'}, event)" title="Click to view payment actions">
-                    <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
-                    <span>Actions</span>
-                    <i class="fas fa-chevron-down action-dropdown-chevron"></i>
-                  </button>
-                </td>
-              </tr>
-            `).join('')}
+          <tbody id="payments-table-tbody">
+            ${renderPaymentTableRows(filteredPayments)}
           </tbody>
         </table>
       </div>
     `;
   }
+  window.renderPayments = renderPayments;
 
   function openPaymentActionMenu(btn, paymentId, clientId, hasAttachment, e) {
     const items = [
@@ -11360,37 +11438,60 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
    * CLIENT DIRECTORY STATE & HELPERS
    * =========================================================================
    */
-  window.window.clientDirectoryFilter = window.window.clientDirectoryFilter || "ALL";
-  window.window.clientDirectorySort = window.window.clientDirectorySort || "NAME_ASC";
-  window.window.clientDirectorySearch = window.window.clientDirectorySearch || "";
+  window.clientDirectoryFilter = window.clientDirectoryFilter || "ALL";
+  window.clientDirectorySort = window.clientDirectorySort || "NAME_ASC";
+  window.clientDirectorySearch = window.clientDirectorySearch || "";
+  if (typeof state !== 'undefined' && state.filters) {
+    state.filters.clients = state.filters.clients || "";
+  }
 
   function getClientFilteredList() {
-    const q = (window.clientDirectorySearch || "").toLowerCase().trim();
-    let list = state.clients.filter(c => {
+    const q = (window.clientDirectorySearch || (typeof state !== 'undefined' && state.filters ? state.filters.clients : "") || "").toLowerCase().trim();
+    const rawClients = (typeof state !== 'undefined' && state.clients) ? state.clients : [];
+
+    let list = rawClients.filter(c => {
+      if (!c) return false;
+      const name = String(c.Client_Name || "").toLowerCase();
+      const id = String(c.Client_ID || "").toLowerCase();
+      const phone = String(c.Phone || "").toLowerCase();
+      const altPhone = String(c.Alternate_Phone || "").toLowerCase();
+      const contact = String(c.Contact_Person || "").toLowerCase();
+      const designation = String(c.Contact_Designation || "").toLowerCase();
+      const city = String(c.City_Area || "").toLowerCase();
+      const stateName = String(c.State_Name || "").toLowerCase();
+      const gstin = String(c.GSTIN || "").toLowerCase();
+      const type = String(c.Account_Type || "").toLowerCase();
+      const rep = (typeof getUserName === 'function') ? String(getUserName(c.Assigned_User_ID) || "").toLowerCase() : "";
+      const status = String(c.Status || "ACTIVE").toUpperCase();
+
       const matchSearch = !q ||
-        (c.Client_Name && c.Client_Name.toLowerCase().includes(q)) ||
-        (c.Client_ID && c.Client_ID.toLowerCase().includes(q)) ||
-        (c.Phone && c.Phone.toLowerCase().includes(q)) ||
-        (c.Contact_Person && c.Contact_Person.toLowerCase().includes(q)) ||
-        (c.City_Area && c.City_Area.toLowerCase().includes(q)) ||
-        (c.GSTIN && c.GSTIN.toLowerCase().includes(q)) ||
-        (c.Account_Type && c.Account_Type.toLowerCase().includes(q));
+        name.includes(q) ||
+        id.includes(q) ||
+        phone.includes(q) ||
+        altPhone.includes(q) ||
+        contact.includes(q) ||
+        designation.includes(q) ||
+        city.includes(q) ||
+        stateName.includes(q) ||
+        gstin.includes(q) ||
+        type.includes(q) ||
+        rep.includes(q);
 
       if (!matchSearch) return false;
 
-      if (window.clientDirectoryFilter === "ACTIVE") return (c.Status || "ACTIVE") === "ACTIVE";
-      if (window.clientDirectoryFilter === "PROSPECT") return (c.Status || "").includes("PROSPECT") || (c.Status || "").includes("LEAD");
+      if (window.clientDirectoryFilter === "ACTIVE") return status === "ACTIVE";
+      if (window.clientDirectoryFilter === "PROSPECT") return status.includes("PROSPECT") || status.includes("LEAD");
       if (window.clientDirectoryFilter === "DUE") return Number(c.Outstanding_Balance || 0) > 0;
-      if (window.clientDirectoryFilter === "GEOTAGGED") return Boolean(c.GPS_Location && c.GPS_Location.trim() !== "");
+      if (window.clientDirectoryFilter === "GEOTAGGED") return Boolean(c.GPS_Location && String(c.GPS_Location).trim() !== "");
       
       return true;
     });
 
     // Sorting
     if (window.clientDirectorySort === "NAME_ASC") {
-      list.sort((a, b) => (a.Client_Name || "").localeCompare(b.Client_Name || ""));
+      list.sort((a, b) => String(a.Client_Name || "").localeCompare(String(b.Client_Name || "")));
     } else if (window.clientDirectorySort === "NAME_DESC") {
-      list.sort((a, b) => (b.Client_Name || "").localeCompare(a.Client_Name || ""));
+      list.sort((a, b) => String(b.Client_Name || "").localeCompare(String(a.Client_Name || "")));
     } else if (window.clientDirectorySort === "DUE_DESC") {
       list.sort((a, b) => Number(b.Outstanding_Balance || 0) - Number(a.Outstanding_Balance || 0));
     } else if (window.clientDirectorySort === "CREDIT_DESC") {
@@ -11461,8 +11562,8 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
         
         <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 380px;">
           <i class="fas fa-search" style="color: var(--text-muted);"></i>
-          <input type="text" id="client-table-search-input" class="form-control" placeholder="Search by Client Name, Phone, Contact Person, GSTIN, City..." value="${window.clientDirectorySearch}" oninput="filterClientsTable(this.value)">
-          ${window.clientDirectorySearch ? `<button type="button" class="btn btn-secondary btn-sm" onclick="filterClientsTable('')"><i class="fas fa-times"></i></button>` : ''}
+          <input type="text" id="client-table-search-input" class="form-control" placeholder="Search by Client Name, Phone, Contact Person, GSTIN, City..." value="${window.clientDirectorySearch || ''}" oninput="filterClientsTable(this.value)">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="filterClientsTable('')" title="Clear Search"><i class="fas fa-times"></i></button>
         </div>
 
         
@@ -11520,13 +11621,22 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
   }
 
   function filterClientsTable(query) {
-    window.clientDirectorySearch = query;
+    const cleanQ = query !== undefined ? query : "";
+    window.clientDirectorySearch = cleanQ;
+    if (typeof state !== 'undefined' && state.filters) {
+      state.filters.clients = cleanQ;
+    }
+    const searchInput = document.getElementById("client-table-search-input");
+    if (searchInput && searchInput.value !== cleanQ) {
+      searchInput.value = cleanQ;
+    }
     const filtered = getClientFilteredList();
     const tbody = document.getElementById("clients-table-tbody");
     const countEl = document.getElementById("clients-showing-count");
     if (tbody) tbody.innerHTML = renderClientTableRows(filtered);
     if (countEl) countEl.textContent = filtered.length;
   }
+  window.filterClientsTable = filterClientsTable;
 
   function setClientFilter(filterType) {
     window.clientDirectoryFilter = filterType;
@@ -14336,9 +14446,170 @@ window.openNewClientModal = window.openClientModal;
 
   /**
    * =========================================================================
-   * 1. MAIN VIEW: RENDER USERS & ROLES MATRIX
+   * 1. MAIN VIEW: RENDER USERS & ROLES MATRIX HELPERS & FILTERS
    * =========================================================================
    */
+  function getFilteredUsersList() {
+    const users = state.users || [];
+    const q = (window.usersSearchQuery || (typeof state !== 'undefined' && state.filters ? state.filters.users : "") || "").toLowerCase().trim();
+    const roleF = window.usersRoleFilter || "ALL";
+    const statusF = window.usersStatusFilter || "ALL";
+
+    return users.filter(u => {
+      if (!u) return false;
+      const matchQ = !q || (
+        String(u.Full_Name || "").toLowerCase().includes(q) ||
+        String(u.User_ID || "").toLowerCase().includes(q) ||
+        String(u.Email || "").toLowerCase().includes(q) ||
+        String(u.Mobile || "").toLowerCase().includes(q) ||
+        String(u.Department || "").toLowerCase().includes(q) ||
+        String(u.Designation || "").toLowerCase().includes(q) ||
+        String(u.Territory_Zone || "").toLowerCase().includes(q) ||
+        String(u.Role || "").toLowerCase().includes(q) ||
+        String(u.Manager_Name || "").toLowerCase().includes(q)
+      );
+      const matchRole = roleF === "ALL" || u.Role === roleF;
+      const matchStatus = statusF === "ALL" || (u.Status || "ACTIVE") === statusF;
+      return matchQ && matchRole && matchStatus;
+    });
+  }
+  window.getFilteredUsersList = getFilteredUsersList;
+
+  function renderUserTableRows(filteredUsers) {
+    const currentUser = state.currentUser || { Role: "ADMIN", User_ID: "USR-100", Full_Name: "Vikram Shah" };
+    const isAdmin = currentUser.Role === "ADMIN";
+
+    if (!filteredUsers || filteredUsers.length === 0) {
+      return `
+        <tr>
+          <td colspan="${isAdmin ? 8 : 7}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
+            <i class="fas fa-user-slash fa-2x" style="margin-bottom: 10px; display: block; opacity: 0.4;"></i>
+            No employee records found matching your search and filter criteria.
+          </td>
+        </tr>
+      `;
+    }
+
+    return filteredUsers.map(u => {
+      const perms = getUserPermissions(u);
+      const modulesWithAccess = SYSTEM_FACILITIES.filter(f => {
+        const p = perms[f.id];
+        return p && (p.view || p.add || p.edit || p.delete);
+      }).length;
+      const isSelected = (window.selectedUserIds || []).includes(u.User_ID);
+      const initials = (u.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
+      const isSelf = currentUser && currentUser.User_ID === u.User_ID;
+
+      return `
+        <tr style="${isSelected ? 'background: rgba(15, 118, 110, 0.05);' : ''}">
+          ${isAdmin ? `
+            <td style="text-align: center;">
+              <input type="checkbox" value="${u.User_ID}" ${isSelected ? 'checked' : ''} onchange="toggleUserSelect('${u.User_ID}', this.checked)">
+            </td>
+          ` : ''}
+          
+          <!-- 1. Employee ID / Name -->
+          <td>
+            <div style="display: flex; align-items: baseline; gap: 6px;">
+              <strong style="color: var(--text-main); font-size: 0.9rem;">${u.Full_Name}</strong>
+              ${isSelf ? '<span class="badge badge-active" style="font-size: 0.65rem; padding: 1px 5px;">You</span>' : ''}
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+              <span style="font-size: 0.75rem; font-family: monospace; color: var(--primary); font-weight: 600;">${u.User_ID}</span>
+              <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${(u.Status || 'ACTIVE') === 'ACTIVE' ? 'var(--success)' : 'var(--danger)'};" title="Status: ${u.Status || 'ACTIVE'}"></span>
+              <span style="font-size: 0.7rem; color: var(--text-muted);">${u.Status || 'ACTIVE'}</span>
+            </div>
+          </td>
+
+          <!-- 2. Profile Photo -->
+          <td style="text-align: center;">
+            <div style="display: inline-flex; position: relative; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.85rem; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm); cursor: pointer;" onclick="openUserDetailsModal('${u.User_ID}')" title="Click to view ${u.Full_Name}'s profile">
+              ${u.Photo ? `
+                <img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">
+              ` : `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">${initials}</div>`}
+            </div>
+          </td>
+
+          <!-- 3. Role & Access -->
+          <td>
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <span class="badge ${u.Role === 'ADMIN' ? 'badge-active' : (u.Role === 'MANAGER' ? 'badge-pending' : 'badge-on-hold')}" style="font-size: 0.72rem; font-weight: 700;">
+                ${u.Role}
+              </span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Configure single-window granular CRUD rights" style="font-size: 0.725rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 5px; border-radius: 4px;">
+              <i class="fas fa-sliders-h" style="color: var(--primary);"></i>
+              <span>${modulesWithAccess}/${SYSTEM_FACILITIES.length} Access</span>
+              <span class="badge badge-active" style="font-size: 0.6rem; padding: 1px 4px;">CRUD</span>
+            </button>
+          </td>
+
+          <!-- 4. Department -->
+          <td>
+            <div style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">${u.Department || 'Operations'}</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">${u.Designation || '-'}</div>
+          </td>
+
+          <!-- 5. Contact Info (Phone + Email + Direct WhatsApp Button) -->
+          <td>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 0.825rem;">
+              <a href="tel:${u.Mobile || ''}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Call ${u.Full_Name}">
+                <i class="fas fa-phone" style="font-size: 0.7rem; color: var(--primary);"></i>
+                <span>${u.Mobile || '-'}</span>
+              </a>
+              ${u.Mobile ? `
+                <button type="button" class="btn-circle btn-secondary" onclick="openWhatsAppLink('${u.Mobile}', 'Hello ${u.Full_Name.replace(/'/g, "\\'")},')" title="Chat with ${u.Full_Name} on WhatsApp" style="width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #25D366; border-radius: 50%; font-size: 0.72rem; border: 1px solid rgba(37, 211, 102, 0.4); cursor: pointer;">
+                  <i class="fab fa-whatsapp"></i>
+                </button>
+              ` : ''}
+            </div>
+            ${u.Email ? `
+              <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 3px;">
+                <a href="mailto:${u.Email}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Email ${u.Full_Name}">
+                  <i class="fas fa-envelope" style="font-size: 0.68rem; color: var(--text-muted);"></i>
+                  <span>${u.Email}</span>
+                </a>
+              </div>
+            ` : ''}
+          </td>
+
+          <!-- 6. Reports To -->
+          <td>
+            <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-main);">${u.Manager_Name || '-'}</div>
+          </td>
+
+          <!-- 7. Action Button (Option 1: Actions Dropdown Menu) -->
+          <td style="text-align: right; white-space: nowrap;">
+            <button type="button" class="action-dropdown-btn" onclick="openUserActionMenu(this, '${u.User_ID}', ${isAdmin ? 'true' : 'false'}, ${isSelf ? 'true' : 'false'}, '${u.Status || 'ACTIVE'}', event)" title="Click to view employee actions">
+              <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+              <span>Actions</span>
+              <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+  window.renderUserTableRows = renderUserTableRows;
+
+  function filterUsersTable(query) {
+    const cleanQ = query !== undefined ? query : "";
+    window.usersSearchQuery = cleanQ;
+    if (typeof state !== 'undefined' && state.filters) {
+      state.filters.users = cleanQ;
+    }
+    const searchInput = document.getElementById("users-search-input");
+    if (searchInput && searchInput.value !== cleanQ) {
+      searchInput.value = cleanQ;
+    }
+    const filteredUsers = getFilteredUsersList();
+    const tbody = document.getElementById("users-table-tbody");
+    const countEl = document.getElementById("users-count-showing");
+    if (tbody) tbody.innerHTML = renderUserTableRows(filteredUsers);
+    if (countEl) countEl.textContent = filteredUsers.length;
+  }
+  window.filterUsersTable = filterUsersTable;
+
   function renderUsers(container) {
     if (!container) container = document.getElementById("app-content");
     if (!container) return;
@@ -14347,30 +14618,12 @@ window.openNewClientModal = window.openClientModal;
     const isAdmin = currentUser.Role === "ADMIN";
     const users = state.users || [];
 
-    // Filter users by search, role, and status
-    const q = (window.usersSearchQuery || "").toLowerCase().trim();
     const roleF = window.usersRoleFilter || "ALL";
     const statusF = window.usersStatusFilter || "ALL";
-
-    const filteredUsers = users.filter(u => {
-      const matchQ = !q || (
-        (u.Full_Name || "").toLowerCase().includes(q) ||
-        (u.User_ID || "").toLowerCase().includes(q) ||
-        (u.Email || "").toLowerCase().includes(q) ||
-        (u.Mobile || "").toLowerCase().includes(q) ||
-        (u.Department || "").toLowerCase().includes(q) ||
-        (u.Designation || "").toLowerCase().includes(q) ||
-        (u.Territory_Zone || "").toLowerCase().includes(q)
-      );
-      const matchRole = roleF === "ALL" || u.Role === roleF;
-      const matchStatus = statusF === "ALL" || (u.Status || "ACTIVE") === statusF;
-      return matchQ && matchRole && matchStatus;
-    });
+    const filteredUsers = getFilteredUsersList();
 
     const activeCount = users.filter(u => (u.Status || "ACTIVE") === "ACTIVE").length;
     const inactiveCount = users.length - activeCount;
-    const selectedCount = (window.selectedUserIds || []).length;
-    const allFilteredSelected = filteredUsers.length > 0 && filteredUsers.every(u => (window.selectedUserIds || []).includes(u.User_ID));
 
     container.innerHTML = `
       <!-- Top Action & Overview Bar -->
@@ -14437,14 +14690,15 @@ window.openNewClientModal = window.openClientModal;
           
           <div style="display: flex; gap: 10px; flex: 1; max-width: 420px; align-items: center;">
             <i class="fas fa-search" style="color: var(--text-muted);"></i>
-            <input type="text" class="form-control form-control-sm" placeholder="Search by name, ID, phone, department, zone..." value="${window.usersSearchQuery || ''}" oninput="window.usersSearchQuery = this.value; renderUsers();">
+            <input type="text" id="users-search-input" class="form-control form-control-sm" placeholder="Search by name, ID, phone, department, zone..." value="${window.usersSearchQuery || ''}" oninput="filterUsersTable(this.value)">
+            <button class="btn btn-secondary btn-sm" onclick="filterUsersTable('')" title="Clear Search"><i class="fas fa-times"></i></button>
           </div>
 
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <!-- Role Filter -->
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Role:</span>
-              <select class="form-control form-control-sm" style="width: 140px;" onchange="window.usersRoleFilter = this.value; renderUsers();">
+              <select class="form-control form-control-sm" style="width: 140px;" onchange="window.usersRoleFilter = this.value; filterUsersTable(window.usersSearchQuery);">
                 <option value="ALL" ${roleF === 'ALL' ? 'selected' : ''}>All Roles</option>
                 <option value="ADMIN" ${roleF === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
                 <option value="MANAGER" ${roleF === 'MANAGER' ? 'selected' : ''}>MANAGER</option>
@@ -14456,7 +14710,7 @@ window.openNewClientModal = window.openClientModal;
             <!-- Status Filter -->
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Status:</span>
-              <select class="form-control form-control-sm" style="width: 130px;" onchange="window.usersStatusFilter = this.value; renderUsers();">
+              <select class="form-control form-control-sm" style="width: 130px;" onchange="window.usersStatusFilter = this.value; filterUsersTable(window.usersSearchQuery);">
                 <option value="ALL" ${statusF === 'ALL' ? 'selected' : ''}>All Status</option>
                 <option value="ACTIVE" ${statusF === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
                 <option value="INACTIVE" ${statusF === 'INACTIVE' ? 'selected' : ''}>INACTIVE</option>
@@ -14468,7 +14722,7 @@ window.openNewClientModal = window.openClientModal;
             <!-- Clear Filter Button -->
             ${(window.usersSearchQuery || roleF !== 'ALL' || statusF !== 'ALL') ? `
               <button class="btn btn-secondary btn-sm" onclick="clearUsersFilters()" style="font-size: 0.75rem;">
-                <i class="fas fa-times"></i> Clear
+                <i class="fas fa-undo"></i> Reset
               </button>
             ` : ''}
           </div>
@@ -14508,127 +14762,18 @@ window.openNewClientModal = window.openClientModal;
         <table class="data-table">
           <thead>
             <tr>
-              ${isAdmin ? `
-                <th style="width: 36px; text-align: center;">
-                  <input type="checkbox" id="select-all-users" ${allFilteredSelected ? 'checked' : ''} onchange="toggleSelectAllUsers(this.checked)">
-                </th>
-              ` : ''}
+              ${isAdmin ? '<th style="width: 40px; text-align: center;"><input type="checkbox" onchange="toggleSelectAllUsers(this.checked)" ' + (users.length > 0 && selectedCount === users.length ? 'checked' : '') + '></th>' : ''}
               <th>Employee ID / Name</th>
-              <th style="text-align: center; width: 100px;">Profile Photo</th>
+              <th style="text-align: center; width: 60px;">Photo</th>
               <th>Role & Access</th>
               <th>Department</th>
               <th>Contact Info</th>
               <th>Reports To</th>
-              <th style="min-width: 140px; text-align: right;">Action</th>
+              <th style="text-align: right; width: 110px;">Action</th>
             </tr>
           </thead>
-          <tbody>
-            ${filteredUsers.length === 0 ? `
-              <tr>
-                <td colspan="${isAdmin ? 8 : 7}" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 0.9rem;">
-                  <i class="fas fa-user-slash fa-2x" style="margin-bottom: 10px; display: block; opacity: 0.4;"></i>
-                  No employee records found matching your search and filter criteria.
-                </td>
-              </tr>
-            ` : filteredUsers.map(u => {
-              const perms = getUserPermissions(u);
-              const modulesWithAccess = SYSTEM_FACILITIES.filter(f => {
-                const p = perms[f.id];
-                return p && (p.view || p.add || p.edit || p.delete);
-              }).length;
-              const isSelected = (window.selectedUserIds || []).includes(u.User_ID);
-              const initials = (u.Full_Name || "U P").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
-              const isSelf = currentUser && currentUser.User_ID === u.User_ID;
-
-              return `
-                <tr style="${isSelected ? 'background: rgba(15, 118, 110, 0.05);' : ''}">
-                  ${isAdmin ? `
-                    <td style="text-align: center;">
-                      <input type="checkbox" value="${u.User_ID}" ${isSelected ? 'checked' : ''} onchange="toggleUserSelect('${u.User_ID}', this.checked)">
-                    </td>
-                  ` : ''}
-                  
-                  <!-- 1. Employee ID / Name -->
-                  <td>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">
-                      <strong style="color: var(--text-main); font-size: 0.9rem;">${u.Full_Name}</strong>
-                      ${isSelf ? '<span class="badge badge-active" style="font-size: 0.65rem; padding: 1px 5px;">You</span>' : ''}
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
-                      <span style="font-size: 0.75rem; font-family: monospace; color: var(--primary); font-weight: 600;">${u.User_ID}</span>
-                      <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${(u.Status || 'ACTIVE') === 'ACTIVE' ? 'var(--success)' : 'var(--danger)'};" title="Status: ${u.Status || 'ACTIVE'}"></span>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">${u.Status || 'ACTIVE'}</span>
-                    </div>
-                  </td>
-
-                  <!-- 2. Profile Photo -->
-                  <td style="text-align: center;">
-                    <div style="display: inline-flex; position: relative; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 30% 30%, #0d9488, #0f172a); color: #fff; font-weight: 700; font-size: 0.85rem; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm); cursor: pointer;" onclick="openUserDetailsModal('${u.User_ID}')" title="Click to view ${u.Full_Name}'s profile">
-                      ${u.Photo ? `
-                        <img src="${u.Photo}" style="width: 100%; height: 100%; object-fit: cover;" alt="${u.Full_Name}">
-                      ` : `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">${initials}</div>`}
-                    </div>
-                  </td>
-
-                  <!-- 3. Role & Access -->
-                  <td>
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                      <span class="badge ${u.Role === 'ADMIN' ? 'badge-active' : (u.Role === 'MANAGER' ? 'badge-pending' : 'badge-on-hold')}" style="font-size: 0.72rem; font-weight: 700;">
-                        ${u.Role}
-                      </span>
-                    </div>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Configure single-window granular CRUD rights" style="font-size: 0.725rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 5px; border-radius: 4px;">
-                      <i class="fas fa-sliders-h" style="color: var(--primary);"></i>
-                      <span>${modulesWithAccess}/${SYSTEM_FACILITIES.length} Access</span>
-                      <span class="badge badge-active" style="font-size: 0.6rem; padding: 1px 4px;">CRUD</span>
-                    </button>
-                  </td>
-
-                  <!-- 4. Department -->
-                  <td>
-                    <div style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">${u.Department || 'Operations'}</div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">${u.Designation || '-'}</div>
-                  </td>
-
-                  <!-- 5. Contact Info (Phone + Email + Direct WhatsApp Button) -->
-                  <td>
-                    <div style="display: flex; align-items: center; gap: 6px; font-size: 0.825rem;">
-                      <a href="tel:${u.Mobile || ''}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Call ${u.Full_Name}">
-                        <i class="fas fa-phone" style="font-size: 0.7rem; color: var(--primary);"></i>
-                        <span>${u.Mobile || '-'}</span>
-                      </a>
-                      ${u.Mobile ? `
-                        <button type="button" class="btn-circle btn-secondary" onclick="openWhatsAppLink('${u.Mobile}', 'Hello ${u.Full_Name.replace(/'/g, "\\'")},')" title="Chat with ${u.Full_Name} on WhatsApp" style="width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #25D366; border-radius: 50%; font-size: 0.72rem; border: 1px solid rgba(37, 211, 102, 0.4); cursor: pointer;">
-                          <i class="fab fa-whatsapp"></i>
-                        </button>
-                      ` : ''}
-                    </div>
-                    ${u.Email ? `
-                      <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 3px;">
-                        <a href="mailto:${u.Email}" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Email ${u.Full_Name}">
-                          <i class="fas fa-envelope" style="font-size: 0.68rem; color: var(--text-muted);"></i>
-                          <span>${u.Email}</span>
-                        </a>
-                      </div>
-                    ` : ''}
-                  </td>
-
-                  <!-- 6. Reports To -->
-                  <td>
-                    <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-main);">${u.Manager_Name || '-'}</div>
-                  </td>
-
-                  <!-- 7. Action Button (Option 1: Actions Dropdown Menu) -->
-                  <td style="text-align: right; white-space: nowrap;">
-                    <button type="button" class="action-dropdown-btn" onclick="openUserActionMenu(this, '${u.User_ID}', ${isAdmin ? 'true' : 'false'}, ${isSelf ? 'true' : 'false'}, '${u.Status || 'ACTIVE'}', event)" title="Click to view employee actions">
-                      <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
-                      <span>Actions</span>
-                      <i class="fas fa-chevron-down action-dropdown-chevron"></i>
-                    </button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
+          <tbody id="users-table-tbody">
+            ${renderUserTableRows(filteredUsers)}
           </tbody>
         </table>
       </div>
@@ -16298,88 +16443,148 @@ window.openNewClientModal = window.openClientModal;
     const tax = getCompanyTaxDetails ? getCompanyTaxDetails() : { gstin: comp.gstin, stateName: comp.state, stateCode: comp.stateCode };
 
     container.innerHTML = `
-      <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;">
+      <div style="display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start;">
         
-        <!-- Company Profile & Registered GST State Configuration -->
-        <div class="card">
-          <div class="card-header" style="justify-content: space-between;">
-            <h3 class="card-title"><i class="fas fa-building" style="color: var(--primary); margin-right: 0.5rem;"></i> Company Profile & Tax Registration</h3>
-            <span class="badge badge-info"><i class="fas fa-landmark"></i> State Code: ${tax.stateCode || '--'} (${tax.stateName})</span>
-          </div>
-          <div class="card-body">
-            <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--text-main);">
-              <i class="fas fa-info-circle" style="color: var(--primary); margin-right: 6px;"></i>
-              <strong>Dynamic GST Tax Engine:</strong> Transactions with clients registered in your company's state are treated as <strong>Intra-State (CGST + SGST)</strong>. Sales to clients in any other state automatically calculate <strong>Inter-State (IGST)</strong>.
+        <!-- Left Column: Branding / Logo Card + Company Profile Form Card -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          
+          <!-- 1. Client Company Logo & Branding Card (User Request 4) -->
+          <div class="card" style="border-radius: 16px; border: 1px solid var(--border-color); background: var(--bg-secondary); box-shadow: var(--shadow-sm); overflow: hidden;">
+            <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-image" style="color: var(--primary); font-size: 1.15rem;"></i>
+                <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-main);">Client Company Logo & Branding</h3>
+              </div>
+              ${comp.logo ? `<span class="badge badge-active" style="font-size: 0.75rem;"><i class="fas fa-check"></i> Custom Logo Active</span>` : `<span class="badge badge-secondary" style="font-size: 0.75rem;">Default App Branding</span>`}
             </div>
+            <div style="padding: 1.5rem;">
+              <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+                <!-- Logo Display Container -->
+                <div style="width: 170px; height: 72px; border: 2px dashed ${comp.logo ? 'var(--primary)' : 'var(--border-color)'}; border-radius: 12px; background: #ffffff; display: flex; align-items: center; justify-content: center; padding: 6px 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); overflow: hidden;">
+                  ${comp.logo ? `
+                    <img id="cfg-logo-preview" src="${comp.logo}" alt="Uploaded Logo" style="max-height: 100%; max-width: 100%; object-fit: contain;">
+                  ` : `
+                    <div style="text-align: center; color: var(--text-muted); font-size: 0.75rem;">
+                      <i class="fas fa-image fa-2x" style="opacity: 0.35; margin-bottom: 4px; display: block;"></i>
+                      <span>No Logo Uploaded</span>
+                    </div>
+                  `}
+                </div>
 
-            <form onsubmit="handleSaveCompanySettings(event)">
-              <div class="form-group">
-                <label class="form-label">Registered Business Legal Name *</label>
-                <input type="text" class="form-control" id="cfg-comp-name" value="${comp.name || ''}" required placeholder="e.g. Apex Global Enterprises">
+                <!-- Controls & Info -->
+                <div style="flex: 1; min-width: 220px;">
+                  <div style="font-weight: 700; font-size: 0.925rem; color: var(--text-main); margin-bottom: 4px;">Organization Logo</div>
+                  <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+                    Your logo will appear on the <strong>Login Page</strong> and at the <strong>Top-Left Beside App Name</strong>.
+                  </div>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <input type="file" id="cfg-logo-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display: none;" onchange="handleCompanyLogoUpload(event)">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('cfg-logo-input').click()" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
+                      <i class="fas fa-upload"></i> ${comp.logo ? 'Change Company Logo' : 'Upload Company Logo'}
+                    </button>
+                    ${comp.logo ? `
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="handleRemoveCompanyLogo()" style="color: var(--danger); display: inline-flex; align-items: center; gap: 5px;">
+                        <i class="fas fa-trash-alt"></i> Remove
+                      </button>
+                    ` : ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Company Profile & Tax Registration Form Card -->
+          <div class="card" style="border-radius: 16px; border: 1px solid var(--border-color); background: var(--bg-secondary); box-shadow: var(--shadow-sm); overflow: hidden;">
+            <div class="card-header" style="justify-content: space-between; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color);">
+              <h3 class="card-title" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-building" style="color: var(--primary);"></i> Company Profile & Tax Registration
+              </h3>
+              <span class="badge badge-info"><i class="fas fa-landmark"></i> State Code: ${tax.stateCode || '--'} (${tax.stateName})</span>
+            </div>
+            <div class="card-body" style="padding: 1.5rem;">
+              <div style="background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--text-main);">
+                <i class="fas fa-info-circle" style="color: var(--primary); margin-right: 6px;"></i>
+                <strong>Dynamic GST Tax Engine:</strong> Transactions with clients registered in your company's state are treated as <strong>Intra-State (CGST + SGST)</strong>. Sales to clients in any other state automatically calculate <strong>Inter-State (IGST)</strong>.
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <form onsubmit="handleSaveCompanySettings(event)">
                 <div class="form-group">
-                  <label class="form-label">Company GSTIN (15 Digits) *</label>
-                  <input type="text" class="form-control" id="cfg-comp-gstin" value="${comp.gstin || ''}" maxlength="15" style="text-transform: uppercase; font-family: monospace;" placeholder="e.g. 08AAACN1234A1Z5" oninput="handleCompanyGstinInput(this.value)" required>
-                  <small style="font-size: 0.72rem; color: var(--text-muted);">First 2 digits determine your home tax state code</small>
+                  <label class="form-label">Registered Business Legal Name *</label>
+                  <input type="text" class="form-control" id="cfg-comp-name" value="${comp.name || ''}" required placeholder="e.g. Nexsolve Enterprise">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label">Company GSTIN (15 Digits) *</label>
+                    <input type="text" class="form-control" id="cfg-comp-gstin" value="${comp.gstin || ''}" maxlength="15" style="text-transform: uppercase; font-family: monospace;" placeholder="e.g. 08AAACN1234A1Z5" oninput="handleCompanyGstinInput(this.value)" required>
+                    <small style="font-size: 0.72rem; color: var(--text-muted);">First 2 digits determine your home tax state code</small>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label">Registered Home State *</label>
+                    <select class="form-control" id="cfg-comp-state" required onchange="handleCompanyStateChange(this.value)">
+                      ${Object.keys(GST_STATE_MAP).map(code => `
+                        <option value="${code}" ${code === tax.stateCode ? 'selected' : ''}>${code} - ${GST_STATE_MAP[code]}</option>
+                      `).join('')}
+                    </select>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label">Official Business Email</label>
+                    <input type="email" class="form-control" id="cfg-comp-email" value="${comp.email || ''}" placeholder="orders@nexsolve.in">
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label">Contact Phone / Support</label>
+                    <input type="text" class="form-control" id="cfg-comp-phone" value="${comp.phone || ''}" placeholder="+91 98765 43210">
+                  </div>
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Registered Home State *</label>
-                  <select class="form-control" id="cfg-comp-state" required onchange="handleCompanyStateChange(this.value)">
-                    ${Object.keys(GST_STATE_MAP).map(code => `
-                      <option value="${code}" ${code === tax.stateCode ? 'selected' : ''}>${code} - ${GST_STATE_MAP[code]}</option>
-                    `).join('')}
-                  </select>
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                  <label class="form-label">Official Business Email</label>
-                  <input type="email" class="form-control" id="cfg-comp-email" value="${comp.email || ''}" placeholder="orders@company.com">
+                  <label class="form-label">Registered Address</label>
+                  <textarea class="form-control" id="cfg-comp-address" rows="2" placeholder="Factory / Head Office address...">${comp.address || ''}</textarea>
                 </div>
 
-                <div class="form-group">
-                  <label class="form-label">Contact Phone / Support</label>
-                  <input type="text" class="form-control" id="cfg-comp-phone" value="${comp.phone || ''}" placeholder="+91 98765 43210">
+                <div style="text-align: right; margin-top: 16px;">
+                  <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Business & Tax Settings</button>
                 </div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Registered Address</label>
-                <textarea class="form-control" id="cfg-comp-address" rows="2" placeholder="Factory / Head Office address...">${comp.address || ''}</textarea>
-              </div>
-
-              <div style="text-align: right; margin-top: 16px;">
-                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Business & Tax Settings</button>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
         </div>
 
-        <!-- License & System Status Card -->
-        <div class="card">
-          <div class="card-header"><h3 class="card-title"><i class="fas fa-shield-alt" style="color: var(--primary);"></i> Nexallot Enterprise License</h3></div>
-          <div class="card-body">
-            <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9rem;">
-              <div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Licensed Tenant</div>
-                <strong>${comp.name}</strong>
+        <!-- Right Column: 2nd Box: Nexallot Enterprise License (User Request 5 - exact match to screenshot) -->
+        <div class="card" style="border-radius: 16px; border: 1px solid var(--border-color); background: var(--bg-secondary); box-shadow: var(--shadow-sm); overflow: hidden; height: fit-content; min-height: 480px;">
+          <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-shield-alt" style="color: #0f766e; font-size: 1.25rem;"></i>
+            <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.2px;">Nexallot Enterprise License</h3>
+          </div>
+          <div style="padding: 1.5rem 1.75rem; display: flex; flex-direction: column; gap: 1.5rem;">
+            <div>
+              <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">LICENSED TENANT</div>
+              <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.2px;">${comp.name || 'Nexsolve Enterprise'}</div>
+            </div>
+
+            <div>
+              <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px;">LICENSE KEY</div>
+              <div style="display: inline-flex; align-items: center; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 6px; padding: 4px 12px; font-family: monospace; font-size: 0.9rem; font-weight: 700; color: #0f766e; letter-spacing: 0.5px;">
+                ${comp.licenseKey || 'FF-2026-X892-PRO'}
               </div>
-              <div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">License Key</div>
-                <span style="font-family: monospace; background: var(--bg-primary); padding: 4px 8px; border-radius: 4px; font-weight: 700; color: var(--primary);">${comp.licenseKey}</span>
+            </div>
+
+            <div>
+              <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px;">VALIDITY PERIOD</div>
+              <div style="display: inline-flex; align-items: center; gap: 6px; background: #dcfce7; border: 1px solid #bbf7d0; border-radius: 20px; padding: 4px 12px; font-size: 0.775rem; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 0.3px;">
+                <i class="fas fa-check-circle" style="font-size: 0.85rem;"></i>
+                <span>ACTIVE UNTIL ${comp.expiryDate || '2027-09-30'}</span>
               </div>
-              <div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Validity Period</div>
-                <span class="badge badge-active"><i class="fas fa-check-circle"></i> Active until ${comp.expiryDate}</span>
-              </div>
-              <div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Authorized Staff Seats</div>
-                <strong>${(state.users || []).length} / ${comp.maxUsers} Users Authorized</strong>
-              </div>
+            </div>
+
+            <div>
+              <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">AUTHORIZED STAFF SEATS</div>
+              <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">${(state.users || []).length} / ${comp.maxUsers || 150} Users Authorized</div>
             </div>
           </div>
         </div>
@@ -16439,6 +16644,69 @@ window.openNewClientModal = window.openClientModal;
   }
   window.handleSaveCompanySettings = handleSaveCompanySettings;
 
+  function handleCompanyLogoUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (file.size > 3 * 1024 * 1024) {
+      showToast("File size too large. Please select an image under 3MB.", "error");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const rawDataUrl = e.target.result;
+      
+      const img = new Image();
+      img.onload = function() {
+        const maxWidth = 280;
+        const maxHeight = 90;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL("image/png");
+
+        state.company.logo = compressedDataUrl;
+        localStorage.setItem("nexallot_company_logo", compressedDataUrl);
+        if (typeof updateCompanyLogoUI === "function") {
+          updateCompanyLogoUI(compressedDataUrl);
+        }
+        showToast("Company logo uploaded and updated successfully!", "success");
+        renderSettings();
+      };
+      img.onerror = function() {
+        showToast("Failed to load image. Please try another image file.", "error");
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+  window.handleCompanyLogoUpload = handleCompanyLogoUpload;
+
+  function handleRemoveCompanyLogo() {
+    if (!confirm("Are you sure you want to remove the company logo?")) return;
+    state.company.logo = "";
+    localStorage.removeItem("nexallot_company_logo");
+    if (typeof updateCompanyLogoUI === "function") {
+      updateCompanyLogoUI("");
+    }
+    showToast("Company logo removed. Default branding active.", "info");
+    renderSettings();
+  }
+  window.handleRemoveCompanyLogo = handleRemoveCompanyLogo;
+
   window.renderSettings = renderSettings;
 })();
 </script>
@@ -16451,6 +16719,7 @@ window.openNewClientModal = window.openClientModal;
         if (typeof loadSavedMasters === 'function') loadSavedMasters();
         if (typeof updateNavUserProfile === 'function') updateNavUserProfile();
         if (typeof updateActiveVisitPill === 'function') updateActiveVisitPill();
+        if (typeof updateCompanyLogoUI === 'function') updateCompanyLogoUI();
         if (typeof updateHeaderMeta === 'function') updateHeaderMeta(state.currentView || 'dashboard');
         console.log("✅ Nexallot Application Initialized Successfully.");
       } catch (err) {
