@@ -14624,6 +14624,7 @@ window.openNewClientModal = window.openClientModal;
 
     const activeCount = users.filter(u => (u.Status || "ACTIVE") === "ACTIVE").length;
     const inactiveCount = users.length - activeCount;
+    const selectedCount = (window.selectedUserIds || []).length;
 
     container.innerHTML = `
       <!-- Top Action & Overview Bar -->
@@ -15933,9 +15934,6 @@ window.openNewClientModal = window.openClientModal;
   window.renderUsers = renderUsers;
   window.openNewUserModal = openNewUserModal;
   window.openEditUserModal = openEditUserModal;
-  window.openUserDetailsModal = openUserDetailsModal;
-  window.openUserFacilitiesModal = openUserFacilitiesModal;
-  window.openCurrentUserProfileModal = openCurrentUserProfileModal;
 })();
 </script>
   <script>
