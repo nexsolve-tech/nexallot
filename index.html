@@ -2226,27 +2226,20 @@ h1, h2, h3, h4, h5, h6 {
 
   // Complete Master & Operational Store
   const state = {
-    currentUser: {
-      User_ID: "USR-102",
-      Full_Name: "Amit Patel",
-      Role: "EXECUTIVE",
-      Department: "Sales & Marketing",
-      Designation: "Sr. Field Executive",
-      Manager_ID: "USR-101",
-      Branch_Area: "North Zone"
-    },
+    currentUser: null,
     company: {
-      name: localStorage.getItem("nexallot_company_name") || "Nexsolve Enterprise",
-      email: localStorage.getItem("nexallot_company_email") || "orders@nexsolve.in",
-      gstin: localStorage.getItem("nexallot_company_gstin") || "08AAACA1234A1Z5", // Dynamic: 08 for Rajasthan, 24 for Gujarat, etc.
-      state: localStorage.getItem("nexallot_company_state") || "Rajasthan",
-      stateCode: localStorage.getItem("nexallot_company_state_code") || "08",
+      name: localStorage.getItem("nexallot_company_name") || "NexSolve Demo Corporation",
+      email: localStorage.getItem("nexallot_company_email") || "support@nexsolve.in",
+      gstin: localStorage.getItem("nexallot_company_gstin") || "24AYKPG3358F1Z3", // Dynamic GSTIN
+      state: localStorage.getItem("nexallot_company_state") || "Gujarat",
+      stateCode: localStorage.getItem("nexallot_company_state_code") || "24",
       phone: localStorage.getItem("nexallot_company_phone") || "+91 98765 43210",
       address: localStorage.getItem("nexallot_company_address") || "Industrial Estate, Phase 1",
       logo: localStorage.getItem("nexallot_company_logo") || "",
-      licenseKey: "FF-2026-X892-PRO",
-      expiryDate: "2027-09-30",
-      maxUsers: 150
+      licenseKey: localStorage.getItem("nexallot_company_license_key") || "NEX-DEMO-2026",
+      expiryDate: localStorage.getItem("nexallot_company_expiry") || "2031-10-11",
+      maxUsers: Number(localStorage.getItem("nexallot_company_max_users")) || 50,
+      orgCode: localStorage.getItem("nexallot_org") || "nexsolve"
     },
     currentView: "dashboard",
     activeVisit: null,
@@ -3748,6 +3741,14 @@ h1, h2, h3, h4, h5, h6 {
   window.downloadCurrentAttachment = downloadCurrentAttachment;
 
   function renderView(viewId) {
+    const lockEl = document.getElementById("license-lockout-screen");
+    if (lockEl && lockEl.style.display !== "none") {
+      return;
+    }
+    if (!state.currentUser) {
+      showLoginOverlay();
+      return;
+    }
     const viewport = document.getElementById("app-content");
     if (!viewport) return;
     try {
@@ -3780,9 +3781,15 @@ h1, h2, h3, h4, h5, h6 {
     try {
       const params = new URLSearchParams(window.location.search);
       const orgParam = params.get("org") || params.get("company");
-      if (orgParam) {
-        localStorage.setItem("nexallot_org", orgParam.trim().toLowerCase());
-        return orgParam.trim().toLowerCase();
+      if (orgParam && orgParam.trim()) {
+        const clean = orgParam.trim().toLowerCase();
+        const prevOrg = localStorage.getItem("nexallot_org");
+        if (prevOrg && prevOrg !== clean) {
+          localStorage.removeItem("nexallot_session_user");
+          localStorage.removeItem("nexallot_users_cache");
+        }
+        localStorage.setItem("nexallot_org", clean);
+        return clean;
       }
     } catch(e) {}
     return localStorage.getItem("nexallot_org") || "nexsolve";
@@ -3995,6 +4002,13 @@ h1, h2, h3, h4, h5, h6 {
           });
         }
         if (Array.isArray(data.complaints)) state.complaints = data.complaints;
+        if (data.company) {
+          state.company = Object.assign(state.company || {}, data.company);
+          localStorage.setItem("nexallot_company_name", state.company.name);
+          localStorage.setItem("nexallot_company_license_key", state.company.licenseKey);
+          localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
+          localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
+        }
 
         // Re-render view with fresh database data
         if (typeof renderView === 'function') {
@@ -4012,7 +4026,63 @@ h1, h2, h3, h4, h5, h6 {
   }
   window.loadLiveAppDataFromSheet = loadLiveAppDataFromSheet;
 
-  function checkAndRenderAuth() {
+  async function checkAndRenderAuth() {
+    const orgCode = getActiveOrgCode();
+
+    // Show temporary verifying veil while validating against central license sheet
+    let lockEl = document.getElementById("license-lockout-screen");
+    if (!lockEl) {
+      lockEl = document.createElement("div");
+      lockEl.id = "license-lockout-screen";
+      lockEl.style.cssText = "position: fixed; inset: 0; z-index: 999999; background: radial-gradient(circle at 50% 20%, #1e293b 0%, #0f172a 100%); display: flex; align-items: center; justify-content: center; padding: 20px; font-family: inherit;";
+      lockEl.innerHTML = `
+        <div style="text-align: center; color: #ffffff;">
+          <div style="font-size: 2.5rem; margin-bottom: 1rem; color: #38bdf8;">
+            <i class="fas fa-shield-alt fa-spin"></i>
+          </div>
+          <h3 style="margin: 0 0 8px 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.2px;">Verifying Enterprise License...</h3>
+          <p style="margin: 0; font-size: 0.85rem; color: #94a3b8;">Authenticating tenant workspace <code style="color: #38bdf8; background: rgba(56,189,248,0.1); padding: 2px 6px; border-radius: 4px;">${orgCode}</code></p>
+        </div>
+      `;
+      document.body.appendChild(lockEl);
+    }
+
+    // 1. STRICT LICENSE VERIFICATION against Central Master License Sheet (1N8TMOxde69x61vJFXwvRUE8IJ2NM6GwZqkiRdn2s5L8)
+    let lic = null;
+    try {
+      lic = await callBackendApi("validate_license", { orgCode: orgCode });
+    } catch(err) {
+      console.warn("Notice: Master license verification network call failed:", err);
+    }
+
+    // 2. If license verification failed, lock application immediately!
+    if (!lic || lic.valid === false) {
+      localStorage.removeItem("nexallot_session_user");
+      state.currentUser = null;
+      renderLicenseLockoutScreen(orgCode, lic ? lic.error : "Unable to reach central master license database. Please check your internet connection.");
+      return;
+    }
+
+    // Remove any previous lockout/verifying screen
+    const existingLockout = document.getElementById("license-lockout-screen");
+    if (existingLockout) existingLockout.remove();
+
+    // 3. License is 100% verified! Sync company state with live master license sheet data
+    state.company = state.company || {};
+    state.company.name = lic.companyName || "NexSolve Demo Corporation";
+    state.company.licenseKey = lic.licenseKey || "NEX-DEMO-2026";
+    state.company.expiryDate = lic.expiryDate || "2031-10-11";
+    state.company.maxUsers = Number(lic.maxUsers) || 50;
+    state.company.orgCode = lic.orgCode || orgCode;
+    state.company.status = lic.status || "ACTIVE";
+
+    localStorage.setItem("nexallot_company_name", state.company.name);
+    localStorage.setItem("nexallot_company_license_key", state.company.licenseKey);
+    localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
+    localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
+    localStorage.setItem("nexallot_org", state.company.orgCode);
+
+    // 4. Check for active user session in this verified organization
     const saved = localStorage.getItem("nexallot_session_user");
     if (saved) {
       try {
@@ -4043,6 +4113,69 @@ h1, h2, h3, h4, h5, h6 {
   }
   window.checkAndRenderAuth = checkAndRenderAuth;
 
+  function renderLicenseLockoutScreen(orgCode, errorMessage) {
+    hideLoginOverlay();
+    let lockEl = document.getElementById("license-lockout-screen");
+    if (!lockEl) {
+      lockEl = document.createElement("div");
+      lockEl.id = "license-lockout-screen";
+      lockEl.style.cssText = "position: fixed; inset: 0; z-index: 999999; background: radial-gradient(circle at 50% 20%, #1e293b 0%, #0f172a 100%); display: flex; align-items: center; justify-content: center; padding: 20px; font-family: inherit;";
+      document.body.appendChild(lockEl);
+    }
+    const cleanOrg = String(orgCode || "").trim();
+    lockEl.innerHTML = `
+      <div style="background: #ffffff; border-radius: 20px; max-width: 520px; width: 100%; padding: 2.25rem 2rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; border: 1px solid rgba(255,255,255,0.2);">
+        
+        <div style="width: 72px; height: 72px; border-radius: 50%; background: #fee2e2; color: #dc2626; display: inline-flex; align-items: center; justify-content: center; font-size: 2rem; margin-bottom: 1.25rem; box-shadow: 0 4px 12px rgba(220,38,38,0.2);">
+          <i class="fas fa-lock"></i>
+        </div>
+
+        <h2 style="margin: 0 0 8px 0; font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">
+          License Access Denied
+        </h2>
+
+        <p style="margin: 0 0 16px 0; font-size: 0.9rem; color: #64748b; line-height: 1.5;">
+          The organization workspace <strong style="color: #dc2626; font-family: monospace; background: #fef2f2; padding: 2px 6px; border-radius: 4px;">${cleanOrg || 'unknown'}</strong> is not registered or active in the central Master License database.
+        </p>
+
+        <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px; font-size: 0.825rem; color: #9f1239; text-align: left; display: flex; gap: 8px; align-items: flex-start;">
+          <i class="fas fa-exclamation-circle" style="color: #e11d48; margin-top: 2px;"></i>
+          <div><strong>Security Restriction:</strong> ${errorMessage || 'Organization code not found in central license sheet.'}</div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; text-align: left;">
+          <label style="display: block; font-size: 0.775rem; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 6px;">
+            Switch to Authorized Organization Workspace:
+          </label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="lock-new-org-input" placeholder="e.g. nexsolve" value="nexsolve" style="flex: 1; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; outline: none;">
+            <button type="button" onclick="handleLockoutSwitchOrg()" style="background: #0f766e; color: #ffffff; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">
+              Switch
+            </button>
+          </div>
+        </div>
+
+        <div style="font-size: 0.8rem; color: #94a3b8;">
+          Need a license or subscription assistance? Contact <a href="mailto:support@nexsolve.in" style="color: #0f766e; font-weight: 600; text-decoration: underline;">support@nexsolve.in</a>
+        </div>
+
+      </div>
+    `;
+    lockEl.style.display = "flex";
+  }
+  window.renderLicenseLockoutScreen = renderLicenseLockoutScreen;
+
+  function handleLockoutSwitchOrg() {
+    const input = document.getElementById("lock-new-org-input");
+    const newOrg = input ? input.value.trim().toLowerCase() : "nexsolve";
+    if (newOrg) {
+      localStorage.setItem("nexallot_org", newOrg);
+      localStorage.removeItem("nexallot_session_user");
+      window.location.search = "?org=" + encodeURIComponent(newOrg);
+    }
+  }
+  window.handleLockoutSwitchOrg = handleLockoutSwitchOrg;
+
   function showLoginOverlay() {
     let overlay = document.getElementById("login-screen-overlay");
     if (!overlay) {
@@ -4072,7 +4205,7 @@ h1, h2, h3, h4, h5, h6 {
           <div>
             <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Organization Workspace</div>
             <div style="font-weight: 700; color: #ffffff; font-size: 0.95rem;">
-              <i class="fas fa-building" style="color: #38bdf8; margin-right: 6px;"></i>${currentOrg.toUpperCase()}
+              <i class="fas fa-building" style="color: #38bdf8; margin-right: 6px;"></i>${(state.company && state.company.name) ? state.company.name + ' (' + currentOrg.toUpperCase() + ')' : currentOrg.toUpperCase()}
             </div>
           </div>
           <button onclick="promptChangeOrg()" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer;">
@@ -4160,8 +4293,10 @@ h1, h2, h3, h4, h5, h6 {
     const current = getActiveOrgCode();
     const newOrg = prompt("Enter Organization Code (e.g., nexsolve):", current);
     if (newOrg && newOrg.trim()) {
-      localStorage.setItem("nexallot_org", newOrg.trim().toLowerCase());
-      showLoginOverlay();
+      const clean = newOrg.trim().toLowerCase();
+      localStorage.setItem("nexallot_org", clean);
+      localStorage.removeItem("nexallot_session_user");
+      window.location.search = "?org=" + encodeURIComponent(clean);
     }
   }
   window.promptChangeOrg = promptChangeOrg;
@@ -4195,13 +4330,21 @@ h1, h2, h3, h4, h5, h6 {
     if (btn) btn.disabled = true;
     if (errAlert) errAlert.style.display = "none";
 
-    // 1. Attempt Live Server Authentication
+    let liveCallSucceeded = false;
+
+    // 1. Live Server Authentication against client database
     try {
       const res = await callBackendApi("login", { orgCode: orgCode, identifier: identifier, passcode: passcode });
       if (res && res.success && res.user) {
         state.currentUser = res.user;
         localStorage.setItem("nexallot_session_user", JSON.stringify(res.user));
-        if (res.company) state.company = res.company;
+        if (res.company) {
+          state.company = Object.assign(state.company || {}, res.company);
+          localStorage.setItem("nexallot_company_name", state.company.name);
+          localStorage.setItem("nexallot_company_license_key", state.company.licenseKey);
+          localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
+          localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
+        }
         
         updateAuthenticatedProfileUI();
         hideLoginOverlay();
@@ -4209,34 +4352,46 @@ h1, h2, h3, h4, h5, h6 {
         showToast("Signed in as " + res.user.Full_Name + " (" + res.user.Role + ")", "success");
         await loadLiveAppDataFromSheet(true);
         return;
-      } else if (res && !res.success && res.error) {
-        throw new Error(res.error);
+      } else if (res && !res.success) {
+        liveCallSucceeded = true;
+        throw new Error(res.error || "Invalid credentials or unauthorized account.");
       }
     } catch (apiErr) {
-      console.warn("Live API login fell back to verified seeded accounts:", apiErr.message);
+      if (liveCallSucceeded) {
+        if (errAlert) {
+          errAlert.innerText = apiErr.message;
+          errAlert.style.display = "block";
+        }
+        if (btnText) btnText.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In to Nexallot';
+        if (btn) btn.disabled = false;
+        return;
+      }
+      console.warn("Live API login network error:", apiErr.message);
     }
 
-    // 2. Demo Seed Accounts Fallback
-    const demoAccounts = [
-      { id: "admin@nexsolve.in", pass: "admin123", user: { User_ID: "USR-100", Full_Name: "Vikram Shah", Role: "ADMIN", Designation: "Director", Department: "Management" } },
-      { id: "rajesh@nexsolve.in", pass: "manager123", user: { User_ID: "USR-101", Full_Name: "Rajesh Sharma", Role: "MANAGER", Designation: "Area Sales Manager", Department: "Sales & Marketing", Manager_ID: "USR-100" } },
-      { id: "amit@nexsolve.in", pass: "exec123", user: { User_ID: "USR-102", Full_Name: "Amit Patel", Role: "EXECUTIVE", Designation: "Sr. Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
-      { id: "pooja@nexsolve.in", pass: "exec123", user: { User_ID: "USR-103", Full_Name: "Pooja Verma", Role: "EXECUTIVE", Designation: "Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
-      { id: "suresh@nexsolve.in", pass: "accounts123", user: { User_ID: "USR-104", Full_Name: "Suresh Gupta", Role: "ACCOUNTS", Designation: "Accounts Officer", Department: "Accounts & Finance", Manager_ID: "USR-100" } }
-    ];
+    // 2. Offline fallback ONLY for verified 'nexsolve' demo tenant when server is completely unreachable
+    if (orgCode === 'nexsolve') {
+      const demoAccounts = [
+        { id: "admin@nexsolve.in", pass: "admin123", user: { User_ID: "USR-100", Full_Name: "Vikram Shah", Role: "ADMIN", Designation: "Director", Department: "Management" } },
+        { id: "rajesh@nexsolve.in", pass: "manager123", user: { User_ID: "USR-101", Full_Name: "Rajesh Sharma", Role: "MANAGER", Designation: "Area Sales Manager", Department: "Sales & Marketing", Manager_ID: "USR-100" } },
+        { id: "amit@nexsolve.in", pass: "exec123", user: { User_ID: "USR-102", Full_Name: "Amit Patel", Role: "EXECUTIVE", Designation: "Sr. Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
+        { id: "pooja@nexsolve.in", pass: "exec123", user: { User_ID: "USR-103", Full_Name: "Pooja Verma", Role: "EXECUTIVE", Designation: "Field Executive", Department: "Field Operations", Manager_ID: "USR-101" } },
+        { id: "suresh@nexsolve.in", pass: "accounts123", user: { User_ID: "USR-104", Full_Name: "Suresh Gupta", Role: "ACCOUNTS", Designation: "Accounts Officer", Department: "Accounts & Finance", Manager_ID: "USR-100" } }
+      ];
 
-    const cleanId = identifier.toLowerCase();
-    const matched = demoAccounts.find(a => (a.id.toLowerCase() === cleanId || a.user.User_ID.toLowerCase() === cleanId) && a.pass === passcode);
+      const cleanId = identifier.toLowerCase();
+      const matched = demoAccounts.find(a => (a.id.toLowerCase() === cleanId || a.user.User_ID.toLowerCase() === cleanId) && a.pass === passcode);
 
-    if (matched) {
-      state.currentUser = matched.user;
-      localStorage.setItem("nexallot_session_user", JSON.stringify(matched.user));
-      updateAuthenticatedProfileUI();
-      hideLoginOverlay();
-      renderView(state.currentView || "dashboard");
-      showToast("Signed in as " + matched.user.Full_Name + " (" + matched.user.Role + ")", "success");
-      await loadLiveAppDataFromSheet(true);
-      return;
+      if (matched) {
+        state.currentUser = matched.user;
+        localStorage.setItem("nexallot_session_user", JSON.stringify(matched.user));
+        updateAuthenticatedProfileUI();
+        hideLoginOverlay();
+        renderView(state.currentView || "dashboard");
+        showToast("Signed in as " + matched.user.Full_Name + " (" + matched.user.Role + ")", "success");
+        await loadLiveAppDataFromSheet(true);
+        return;
+      }
     }
 
     if (errAlert) {
@@ -16553,7 +16708,7 @@ window.openNewClientModal = window.openClientModal;
           </div>
         </div>
 
-        <!-- Right Column: 2nd Box: Nexallot Enterprise License (User Request 5 - exact match to screenshot) -->
+        <!-- Right Column: 2nd Box: Nexallot Enterprise License (Reflects central Master License Sheet) -->
         <div class="card" style="border-radius: 16px; border: 1px solid var(--border-color); background: var(--bg-secondary); box-shadow: var(--shadow-sm); overflow: hidden; height: fit-content; min-height: 480px;">
           <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">
             <i class="fas fa-shield-alt" style="color: #0f766e; font-size: 1.25rem;"></i>
@@ -16562,13 +16717,13 @@ window.openNewClientModal = window.openClientModal;
           <div style="padding: 1.5rem 1.75rem; display: flex; flex-direction: column; gap: 1.5rem;">
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">LICENSED TENANT</div>
-              <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.2px;">${comp.name || 'Nexsolve Enterprise'}</div>
+              <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.2px;">${comp.name || 'NexSolve Demo Corporation'}</div>
             </div>
 
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px;">LICENSE KEY</div>
               <div style="display: inline-flex; align-items: center; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 6px; padding: 4px 12px; font-family: monospace; font-size: 0.9rem; font-weight: 700; color: #0f766e; letter-spacing: 0.5px;">
-                ${comp.licenseKey || 'FF-2026-X892-PRO'}
+                ${comp.licenseKey || 'NEX-DEMO-2026'}
               </div>
             </div>
 
@@ -16576,13 +16731,28 @@ window.openNewClientModal = window.openClientModal;
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px;">VALIDITY PERIOD</div>
               <div style="display: inline-flex; align-items: center; gap: 6px; background: #dcfce7; border: 1px solid #bbf7d0; border-radius: 20px; padding: 4px 12px; font-size: 0.775rem; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 0.3px;">
                 <i class="fas fa-check-circle" style="font-size: 0.85rem;"></i>
-                <span>ACTIVE UNTIL ${comp.expiryDate || '2027-09-30'}</span>
+                <span>ACTIVE UNTIL ${(() => {
+                  let dStr = String(comp.expiryDate || '2031-10-11').trim();
+                  if (dStr.includes('T')) {
+                    try {
+                      const dt = new Date(dStr);
+                      if (!isNaN(dt.getTime())) {
+                        const y = dt.getFullYear();
+                        const m = String(dt.getMonth() + 1).padStart(2, '0');
+                        const d = String(dt.getDate()).padStart(2, '0');
+                        return `${y}-${m}-${d}`;
+                      }
+                    } catch(e) {}
+                    return dStr.split('T')[0];
+                  }
+                  return dStr;
+                })()}</span>
               </div>
             </div>
 
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">AUTHORIZED STAFF SEATS</div>
-              <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">${(state.users || []).length} / ${comp.maxUsers || 150} Users Authorized</div>
+              <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">${(state.users || []).filter(u => (u.Status || 'ACTIVE') === 'ACTIVE').length} / ${comp.maxUsers || 50} Users Authorized</div>
             </div>
           </div>
         </div>
