@@ -4130,25 +4130,20 @@ h1, h2, h3, h4, h5, h6 {
           <i class="fas fa-lock"></i>
         </div>
 
-        <h2 style="margin: 0 0 8px 0; font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">
+        <h2 style="margin: 0 0 10px 0; font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">
           License Access Denied
         </h2>
 
-        <p style="margin: 0 0 16px 0; font-size: 0.9rem; color: #64748b; line-height: 1.5;">
-          The organization workspace <strong style="color: #dc2626; font-family: monospace; background: #fef2f2; padding: 2px 6px; border-radius: 4px;">${cleanOrg || 'unknown'}</strong> is not registered or active in the central Master License database.
+        <p style="margin: 0 0 24px 0; font-size: 0.95rem; color: #475569; line-height: 1.5;">
+          The organization workspace <strong style="color: #dc2626; font-family: monospace; background: #fef2f2; padding: 3px 8px; border-radius: 4px;">${cleanOrg || 'workspace'}</strong> is not registered or active.
         </p>
-
-        <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px; font-size: 0.825rem; color: #9f1239; text-align: left; display: flex; gap: 8px; align-items: flex-start;">
-          <i class="fas fa-exclamation-circle" style="color: #e11d48; margin-top: 2px;"></i>
-          <div><strong>Security Restriction:</strong> ${errorMessage || 'Organization code not found in central license sheet.'}</div>
-        </div>
 
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; text-align: left;">
           <label style="display: block; font-size: 0.775rem; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 6px;">
             Switch to Authorized Organization Workspace:
           </label>
           <div style="display: flex; gap: 8px;">
-            <input type="text" id="lock-new-org-input" placeholder="e.g. nexsolve" value="nexsolve" style="flex: 1; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; outline: none;">
+            <input type="text" id="lock-new-org-input" placeholder="Enter Organization Code" value="" style="flex: 1; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; outline: none;" onkeydown="if(event.key==='Enter') handleLockoutSwitchOrg()">
             <button type="button" onclick="handleLockoutSwitchOrg()" style="background: #0f766e; color: #ffffff; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">
               Switch
             </button>
@@ -4156,7 +4151,7 @@ h1, h2, h3, h4, h5, h6 {
         </div>
 
         <div style="font-size: 0.8rem; color: #94a3b8;">
-          Need a license or subscription assistance? Contact <a href="mailto:support@nexsolve.in" style="color: #0f766e; font-weight: 600; text-decoration: underline;">support@nexsolve.in</a>
+          Need a license or subscription assistance? Contact <a href="mailto:mehul.gandhi@nexsolve.in" style="color: #0f766e; font-weight: 600; text-decoration: underline;">mehul.gandhi@nexsolve.in</a>
         </div>
 
       </div>
@@ -4167,11 +4162,14 @@ h1, h2, h3, h4, h5, h6 {
 
   function handleLockoutSwitchOrg() {
     const input = document.getElementById("lock-new-org-input");
-    const newOrg = input ? input.value.trim().toLowerCase() : "nexsolve";
+    const newOrg = input ? input.value.trim().toLowerCase() : "";
     if (newOrg) {
       localStorage.setItem("nexallot_org", newOrg);
       localStorage.removeItem("nexallot_session_user");
       window.location.search = "?org=" + encodeURIComponent(newOrg);
+    } else if (input) {
+      input.focus();
+      input.style.borderColor = "#ef4444";
     }
   }
   window.handleLockoutSwitchOrg = handleLockoutSwitchOrg;
