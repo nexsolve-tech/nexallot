@@ -1840,6 +1840,143 @@ h1, h2, h3, h4, h5, h6 {
   border-bottom: none;
 }
 
+/* ==================== GLOBAL ACTION DROPDOWN SYSTEM (OPTION 1) ==================== */
+.action-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  font-size: 0.775rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.action-dropdown-btn:hover {
+  background: var(--primary-accent);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.action-dropdown-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff !important;
+}
+
+.action-dropdown-btn.active .action-dropdown-chevron {
+  transform: rotate(180deg);
+  color: #ffffff;
+}
+
+.action-dropdown-btn.active i {
+  color: #ffffff !important;
+}
+
+.action-dropdown-chevron {
+  font-size: 0.65rem;
+  transition: transform var(--transition-fast);
+  color: var(--text-muted);
+}
+
+/* Floating Dropdown Menu Container (Fixed to Body, Never Clipped) */
+#global-action-dropdown {
+  position: fixed;
+  z-index: 999999;
+  min-width: 200px;
+  max-width: 280px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  display: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+#global-action-dropdown.show {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.action-dropdown-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border-radius: 6px;
+  font-size: 0.815rem;
+  font-weight: 500;
+  color: var(--text-main);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.action-dropdown-item:hover {
+  background: var(--bg-primary);
+  color: var(--primary);
+}
+
+.action-dropdown-item.danger {
+  color: #ef4444;
+}
+
+.action-dropdown-item.danger:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.action-dropdown-item .action-item-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-dropdown-item .action-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.action-dropdown-item .action-item-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.action-dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
 </style>
 
 
@@ -4072,6 +4209,139 @@ h1, h2, h3, h4, h5, h6 {
     if (btn) btn.disabled = false;
   }
   window.handleLoginSubmit = handleLoginSubmit;
+
+  /**
+   * =========================================================================
+   * UNIVERSAL ENTERPRISE ACTION DROPDOWN PORTAL ENGINE (OPTION 1)
+   * Positioned fixed to document.body - ZERO table clipping or overflow cutoff.
+   * =========================================================================
+   */
+  window._activeActionDropdownBtn = null;
+
+  function closeActionDropdown() {
+    const dropdown = document.getElementById('global-action-dropdown');
+    if (dropdown) {
+      dropdown.classList.remove('show');
+      dropdown.style.display = 'none';
+    }
+    if (window._activeActionDropdownBtn) {
+      window._activeActionDropdownBtn.classList.remove('active');
+      window._activeActionDropdownBtn = null;
+    }
+  }
+  window.closeActionDropdown = closeActionDropdown;
+
+  function openActionDropdown(btn, items, e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    let dropdown = document.getElementById('global-action-dropdown');
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.id = 'global-action-dropdown';
+      document.body.appendChild(dropdown);
+
+      // Dismissal event handlers
+      document.addEventListener('click', function(evt) {
+        const curDropdown = document.getElementById('global-action-dropdown');
+        if (curDropdown && curDropdown.classList.contains('show')) {
+          if (!curDropdown.contains(evt.target) && (!window._activeActionDropdownBtn || !window._activeActionDropdownBtn.contains(evt.target))) {
+            closeActionDropdown();
+          }
+        }
+      });
+
+      window.addEventListener('scroll', function() {
+        closeActionDropdown();
+      }, true);
+
+      window.addEventListener('resize', function() {
+        closeActionDropdown();
+      });
+
+      document.addEventListener('keydown', function(evt) {
+        if (evt.key === 'Escape') closeActionDropdown();
+      });
+    }
+
+    // Toggle close if clicking the currently active button
+    if (window._activeActionDropdownBtn === btn && dropdown.classList.contains('show')) {
+      closeActionDropdown();
+      return;
+    }
+
+    if (window._activeActionDropdownBtn) {
+      window._activeActionDropdownBtn.classList.remove('active');
+    }
+
+    window._activeActionDropdownBtn = btn;
+    btn.classList.add('active');
+
+    // Filter out empty items
+    const validItems = (items || []).filter(Boolean);
+    if (validItems.length === 0) {
+      closeActionDropdown();
+      return;
+    }
+
+    // Generate menu HTML
+    let menuHtml = '<ul class="action-dropdown-menu-list">';
+    validItems.forEach(item => {
+      if (item.divider) {
+        menuHtml += '<li class="action-dropdown-divider"></li>';
+        return;
+      }
+      const icon = item.icon || 'fas fa-chevron-right';
+      const iconColor = item.iconColor ? `style="color: ${item.iconColor};"` : '';
+      const isDanger = item.danger ? 'danger' : '';
+      const badgeHtml = item.badge ? `<span class="badge ${item.badgeClass || 'badge-on-hold'} action-item-badge">${item.badge}</span>` : '';
+      const disabledAttr = item.disabled ? 'disabled style="opacity:0.45; cursor:not-allowed;"' : '';
+      const actionCode = item.action ? `closeActionDropdown(); ${item.action};` : 'closeActionDropdown();';
+
+      menuHtml += `
+        <li>
+          <button type="button" class="action-dropdown-item ${isDanger}" ${disabledAttr} onclick="${actionCode.replace(/"/g, '&quot;')}">
+            <span class="action-item-icon"><i class="${icon}" ${iconColor}></i></span>
+            <span class="action-item-label">${item.label}</span>
+            ${badgeHtml}
+          </button>
+        </li>
+      `;
+    });
+    menuHtml += '</ul>';
+
+    dropdown.innerHTML = menuHtml;
+    dropdown.style.display = 'block';
+
+    // Position calculation with viewport boundaries
+    const rect = btn.getBoundingClientRect();
+    const menuWidth = Math.max(dropdown.offsetWidth || 210, 200);
+    const menuHeight = dropdown.offsetHeight || (validItems.length * 36 + 14);
+
+    // Prefer aligning right edge of menu with right edge of button
+    let left = rect.right - menuWidth;
+    if (left < 10) left = rect.left;
+    if (left + menuWidth > window.innerWidth - 10) {
+      left = window.innerWidth - menuWidth - 10;
+    }
+    if (left < 10) left = 10;
+
+    // Flip upwards if button is near the bottom of viewport
+    let top = rect.bottom + 4;
+    if (rect.bottom + menuHeight > window.innerHeight - 10 && rect.top > menuHeight + 10) {
+      top = rect.top - menuHeight - 4;
+    }
+
+    dropdown.style.left = `${Math.round(left)}px`;
+    dropdown.style.top = `${Math.round(top)}px`;
+
+    requestAnimationFrame(() => {
+      dropdown.classList.add('show');
+    });
+  }
+  window.openActionDropdown = openActionDropdown;
 </script>
   <script>
 (function() {
@@ -5254,19 +5524,67 @@ h1, h2, h3, h4, h5, h6 {
         </td>
         <td>
           ${!v.Check_Out_Time ? `
-            <button class="btn btn-danger btn-sm" onclick="openCheckOutModal('${v.Visit_ID}')"><i class="fas fa-sign-out-alt"></i> Check-Out</button>
-          ` : `
-            <div style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;">
-              <button class="btn btn-secondary btn-sm" onclick="openVisitDetailsModal('${v.Visit_ID}')" title="View Visit Details" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-eye"></i></button>
-              <button class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${v.Client_ID}')" title="Book Order for this Client" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-shopping-cart"></i></button>
-              <button class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${v.Client_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;"><i class="fas fa-wallet"></i></button>
-              <button class="btn btn-secondary btn-sm" onclick="openNewExpenseModal(null, '${v.Visit_ID}')" title="Claim Expense against this visit" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);"><i class="fas fa-receipt"></i></button>
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <button class="btn btn-danger btn-sm" onclick="openCheckOutModal('${v.Visit_ID}')" style="font-weight: 600; padding: 4px 9px; font-size: 0.775rem;">
+                <i class="fas fa-sign-out-alt"></i> Check-Out
+              </button>
+              <button type="button" class="action-dropdown-btn" onclick="openVisitActionMenu(this, '${v.Visit_ID}', '${v.Client_ID}', true, event)" title="More Actions">
+                <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+                <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+              </button>
             </div>
+          ` : `
+            <button type="button" class="action-dropdown-btn" onclick="openVisitActionMenu(this, '${v.Visit_ID}', '${v.Client_ID}', false, event)" title="Click to view actions">
+              <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+              <span>Actions</span>
+              <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+            </button>
           `}
         </td>
       </tr>
     `).join('');
   }
+
+  function openVisitActionMenu(btn, visitId, clientId, isActive, e) {
+    const items = [];
+    if (isActive) {
+      items.push({
+        label: "Check-Out of Client Site",
+        icon: "fas fa-sign-out-alt",
+        iconColor: "#ef4444",
+        action: `openCheckOutModal('${visitId}')`,
+        danger: true
+      });
+      items.push({ divider: true });
+    }
+    items.push({
+      label: "View Visit Details",
+      icon: "fas fa-eye",
+      iconColor: "var(--primary)",
+      action: `openVisitDetailsModal('${visitId}')`
+    });
+    items.push({
+      label: "Book Sales Order",
+      icon: "fas fa-shopping-cart",
+      iconColor: "#0284c7",
+      action: `openNewOrderModal('${clientId}')`
+    });
+    items.push({
+      label: "Collect Payment",
+      icon: "fas fa-wallet",
+      iconColor: "var(--success)",
+      action: `openNewPaymentModal('${clientId}')`
+    });
+    items.push({
+      label: "Claim Visit Expense",
+      icon: "fas fa-receipt",
+      iconColor: "#8b5cf6",
+      action: `openNewExpenseModal(null, '${visitId}')`
+    });
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openVisitActionMenu = openVisitActionMenu;
 
   /**
    * 3. ORDERS & DELIVERIES VIEW (CLEAN SUMMARY COLUMNS)
@@ -5723,34 +6041,57 @@ h1, h2, h3, h4, h5, h6 {
             </td>
             <td><span class="badge ${o.Delivery_Status === 'DELIVERED' ? 'badge-active' : (o.Delivery_Status === 'PARTIAL_DELIVERED' ? 'badge-on-hold' : 'badge-pending')}">${o.Delivery_Status}</span></td>
             <td style="white-space: nowrap;">
-              <div style="display: inline-flex; align-items: center; gap: 6px;">
-                <button class="btn btn-secondary btn-sm" onclick="openOrderDetailsModal('${o.Order_ID}')" title="View Full Order Items Breakdown" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                  <i class="fas fa-eye"></i>
-                </button>
-                <button class="btn btn-secondary btn-sm" onclick="openDeliveryModal('${o.Order_ID}')" title="Delivery Status" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                  <i class="fas fa-truck"></i>
-                </button>
-                <button class="btn btn-secondary btn-sm" onclick="openMaterialReturnModal('${o.Order_ID}')" title="Material Return / Rejection" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: #f43f5e;">
-                  <i class="fas fa-undo-alt"></i>
-                </button>
-                ${!is100Paid ? `
-                  <button class="btn btn-primary btn-sm" onclick="openNewPaymentModal('${o.Client_ID}', '${o.Order_ID}')" title="Collect Payment" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                    <i class="fas fa-wallet"></i>
-                  </button>
-                ` : `
-                  <button class="btn btn-secondary btn-sm disabled" disabled title="100% Paid" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; opacity: 0.4; cursor: not-allowed;">
-                    <i class="fas fa-check" style="color: var(--success);"></i>
-                  </button>
-                `}
-                <button class="btn btn-success btn-sm" onclick="openOrderCommsModal('${o.Order_ID}')" title="Send WhatsApp / Email" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                  <i class="fas fa-paper-plane"></i>
-                </button>
-              </div>
+              <button type="button" class="action-dropdown-btn" onclick="openOrderActionMenu(this, '${o.Order_ID}', '${o.Client_ID}', ${is100Paid}, event)" title="Click to view order actions">
+                <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+                <span>Actions</span>
+                <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+              </button>
             </td>
           </tr>
         `;
       }).join('');
     }
+
+    function openOrderActionMenu(btn, orderId, clientId, is100Paid, e) {
+      const items = [
+        {
+          label: "View Order Details",
+          icon: "fas fa-eye",
+          iconColor: "var(--primary)",
+          action: `openOrderDetailsModal('${orderId}')`
+        },
+        {
+          label: "Update Delivery Status",
+          icon: "fas fa-truck",
+          iconColor: "#0284c7",
+          action: `openDeliveryModal('${orderId}')`
+        },
+        {
+          label: "Material Return / Rejection",
+          icon: "fas fa-undo-alt",
+          iconColor: "#f43f5e",
+          action: `openMaterialReturnModal('${orderId}')`
+        },
+        {
+          label: is100Paid ? "Payment Completed (100%)" : "Collect Payment",
+          icon: is100Paid ? "fas fa-check-circle" : "fas fa-wallet",
+          iconColor: is100Paid ? "var(--success)" : "#10b981",
+          action: is100Paid ? `showToast('Order is 100% paid', 'info')` : `openNewPaymentModal('${clientId}', '${orderId}')`,
+          disabled: is100Paid,
+          badge: is100Paid ? "100% Paid" : "Due Balance",
+          badgeClass: is100Paid ? "badge-active" : "badge-pending"
+        },
+        { divider: true },
+        {
+          label: "Send WhatsApp / Email Invoice",
+          icon: "fas fa-paper-plane",
+          iconColor: "#25D366",
+          action: `openOrderCommsModal('${orderId}')`
+        }
+      ];
+      openActionDropdown(btn, items, e);
+    }
+    window.openOrderActionMenu = openOrderActionMenu;
 
     function renderOrders(container) {
     const filterQuery = (state.filters.orders || "").toLowerCase();
@@ -7255,7 +7596,7 @@ h1, h2, h3, h4, h5, h6 {
               <th>Collected By</th>
               <th>Status</th>
               <th>Attachment</th>
-              <th>Send Receipt</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -7275,10 +7616,14 @@ h1, h2, h3, h4, h5, h6 {
                 <td>${getUserName(p.User_ID)}</td>
                 <td><span class="badge badge-active">${p.Status}</span></td>
                 <td>
-                  ${p.Attachment ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:0.75rem;" onclick="openAttachmentViewer('PAYMENT', '${p.Payment_ID}')"><i class="fas fa-paperclip"></i> View</button>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
+                  ${p.Attachment ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:0.75rem; padding: 2px 8px;" onclick="openAttachmentViewer('PAYMENT', '${p.Payment_ID}')"><i class="fas fa-paperclip"></i> View</button>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
                 </td>
                 <td>
-                  <button class="btn btn-success btn-sm" onclick="openPaymentCommsModal('${p.Payment_ID}')" title="Send WhatsApp / Email Receipt"><i class="fas fa-paper-plane"></i> Send</button>
+                  <button type="button" class="action-dropdown-btn" onclick="openPaymentActionMenu(this, '${p.Payment_ID}', '${p.Client_ID}', ${p.Attachment ? 'true' : 'false'}, event)" title="Click to view payment actions">
+                    <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+                    <span>Actions</span>
+                    <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+                  </button>
                 </td>
               </tr>
             `).join('')}
@@ -7287,6 +7632,41 @@ h1, h2, h3, h4, h5, h6 {
       </div>
     `;
   }
+
+  function openPaymentActionMenu(btn, paymentId, clientId, hasAttachment, e) {
+    const items = [
+      {
+        label: "Send Receipt (WhatsApp / Email)",
+        icon: "fas fa-paper-plane",
+        iconColor: "#25D366",
+        action: `openPaymentCommsModal('${paymentId}')`
+      }
+    ];
+    if (hasAttachment) {
+      items.push({
+        label: "View Deposit Proof",
+        icon: "fas fa-paperclip",
+        iconColor: "#0284c7",
+        action: `openAttachmentViewer('PAYMENT', '${paymentId}')`
+      });
+    }
+    items.push({ divider: true });
+    items.push({
+      label: "Book New Order for Client",
+      icon: "fas fa-shopping-cart",
+      iconColor: "var(--primary)",
+      action: `openNewOrderModal('${clientId}')`
+    });
+    items.push({
+      label: "View Client 360° Profile",
+      icon: "fas fa-id-card",
+      iconColor: "var(--info)",
+      action: `openClientProfileModal('${clientId}')`
+    });
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openPaymentActionMenu = openPaymentActionMenu;
 
   // 6. EXPENSES VIEW (Delegated to modular Expenses.html)
 
@@ -8088,58 +8468,81 @@ h1, h2, h3, h4, h5, h6 {
             ` : '<span style="color:var(--text-muted); font-size:0.75rem;">None</span>'}
           </td>
           <td style="white-space: nowrap;">
-            <!-- Perfectly Aligned, Uniform 32x32px Action Buttons -->
-            <div style="display: inline-flex; align-items: center; gap: 6px;">
-              <!-- 1. View Breakdown & Audit Timeline -->
-              <button class="btn btn-secondary btn-sm" onclick="openExpenseDetailsModal('${e.Claim_ID}')" title="View Full Breakdown & Audit Timeline" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                <i class="fas fa-eye"></i>
-              </button>
-
-              <!-- 2. Edit Claim (if allowed) -->
-              ${canEdit ? `
-                <button class="btn btn-secondary btn-sm" onclick="openNewExpenseModal('${e.Claim_ID}')" title="Edit Claim (Editable until 1st Approval)" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--warning);">
-                  <i class="fas fa-edit"></i>
-                </button>
-              ` : ''}
-
-              <!-- 3. Remind Approver / Accounts -->
-              ${canFollowUp ? `
-                <button class="btn btn-secondary btn-sm" onclick="sendExpenseFollowUp('${e.Claim_ID}')" title="Send WhatsApp / Email Approval Reminder" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);">
-                  <i class="fas fa-bell"></i>
-                </button>
-              ` : ''}
-              
-              <!-- 4. Sign Approvals (L1 / L2 / L3) -->
-              ${canApproveL1 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 1)" title="Sign Level 1 Manager Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                  <i class="fas fa-check"></i>
-                </button>
-              ` : ''}
-
-              ${canApproveL2 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 2)" title="Sign Level 2 Senior Manager Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: #0284c7; border-color: #0284c7;">
-                  <i class="fas fa-check-double"></i>
-                </button>
-              ` : ''}
-
-              ${canApproveL3 ? `
-                <button class="btn btn-success btn-sm" onclick="openExpenseApprovalModal('${e.Claim_ID}', 3)" title="Sign Level 3 Director Approval" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: #8b5cf6; border-color: #8b5cf6;">
-                  <i class="fas fa-check-circle"></i>
-                </button>
-              ` : ''}
-
-              <!-- 5. Accounts Settlement / Payout -->
-              ${canSettleAccounts ? `
-                <button class="btn btn-primary btn-sm" onclick="openExpenseSettlementModal('${e.Claim_ID}')" title="Disburse Payout & Record Bank UTR" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                  <i class="fas fa-hand-holding-usd"></i>
-                </button>
-              ` : ''}
-            </div>
+            <button type="button" class="action-dropdown-btn" onclick="openExpenseActionMenu(this, '${e.Claim_ID}', ${canEdit ? 'true' : 'false'}, ${canFollowUp ? 'true' : 'false'}, ${canApproveL1 ? 1 : (canApproveL2 ? 2 : (canApproveL3 ? 3 : 0))}, ${canSettleAccounts ? 'true' : 'false'}, ${e.Attachment ? 'true' : 'false'}, event)" title="Click to view expense actions">
+              <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+              <span>Actions</span>
+              <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+            </button>
           </td>
         </tr>
       `;
     }).join('');
   }
+
+  function openExpenseActionMenu(btn, claimId, canEdit, canFollowUp, approveLevel, canSettle, hasBill, e) {
+    const items = [
+      {
+        label: "View Claim Audit & Breakdown",
+        icon: "fas fa-eye",
+        iconColor: "var(--primary)",
+        action: `openExpenseDetailsModal('${claimId}')`
+      }
+    ];
+
+    if (hasBill) {
+      items.push({
+        label: "View Uploaded Receipt / Bill",
+        icon: "fas fa-paperclip",
+        iconColor: "#0284c7",
+        action: `openAttachmentViewer('EXPENSE', '${claimId}')`
+      });
+    }
+
+    if (canEdit) {
+      items.push({
+        label: "Edit Expense Claim",
+        icon: "fas fa-edit",
+        iconColor: "var(--warning)",
+        action: `openNewExpenseModal('${claimId}')`
+      });
+    }
+
+    if (canFollowUp) {
+      items.push({
+        label: "Send Approval Follow-up",
+        icon: "fas fa-bell",
+        iconColor: "var(--primary)",
+        action: `sendExpenseFollowUp('${claimId}')`
+      });
+    }
+
+    if (approveLevel > 0) {
+      items.push({ divider: true });
+      items.push({
+        label: `Sign Level ${approveLevel} Approval`,
+        icon: "fas fa-check-double",
+        iconColor: "var(--success)",
+        action: `openExpenseApprovalModal('${claimId}', ${approveLevel})`,
+        badge: `L${approveLevel} Sign-off`,
+        badgeClass: "badge-active"
+      });
+    }
+
+    if (canSettle) {
+      items.push({ divider: true });
+      items.push({
+        label: "Accounts Settlement & Payout",
+        icon: "fas fa-hand-holding-usd",
+        iconColor: "#10b981",
+        action: `openExpenseSettlementModal('${claimId}')`,
+        badge: "Disburse",
+        badgeClass: "badge-active"
+      });
+    }
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openExpenseActionMenu = openExpenseActionMenu;
 
   /**
    * 2. SUBMIT / EDIT MULTI-LINE EXPENSE CLAIM MODAL (WITH SITE VISIT LINKAGE)
@@ -9469,37 +9872,74 @@ window.window.activeTicketCategoryFilter = window.window.activeTicketCategoryFil
               </button>
             ` : `<span style="color: var(--text-muted); font-size: 0.75rem;">None</span>`}
           </td>
-          <td>
-            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openTicketDetailsModal('${t.Ticket_ID}')" title="View Full Ticket Details & History"><i class="fas fa-eye"></i></button>
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" style="color: var(--primary); font-weight: 600;" onclick="scheduleTicketSiteVisit('${t.Ticket_ID}')" title="Dispatch / Check-in Site Visit for this Ticket">
-                <i class="fas fa-map-marker-alt"></i> Visit
-              </button>
-
-              
-              ${!isResolved ? `
-                <button type="button" class="btn btn-success btn-sm" onclick="openResolveTicketModal('${t.Ticket_ID}')" title="Update Progress, Add Notes & Resolve Ticket">
-                  <i class="fas fa-check"></i> Close
-                </button>
-              ` : `
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openResolveTicketModal('${t.Ticket_ID}')" title="View / Update Resolution Notes">
-                  <i class="fas fa-edit"></i>
-                </button>
-              `}
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="sendTicketComms('${t.Ticket_ID}')" title="Share Update via WhatsApp / Email">
-                <i class="fas fa-paper-plane"></i>
-              </button>
-            </div>
+          <td style="white-space: nowrap;">
+            <button type="button" class="action-dropdown-btn" onclick="openServiceActionMenu(this, '${t.Ticket_ID}', ${isResolved ? 'true' : 'false'}, ${t.Attachment ? 'true' : 'false'}, event)" title="Click to view ticket actions">
+              <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+              <span>Actions</span>
+              <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+            </button>
           </td>
         </tr>
       `;
     }).join('');
   }
+
+  function openServiceActionMenu(btn, ticketId, isResolved, hasFile, e) {
+    const items = [
+      {
+        label: "View Full Ticket & History",
+        icon: "fas fa-eye",
+        iconColor: "var(--primary)",
+        action: `openTicketDetailsModal('${ticketId}')`
+      }
+    ];
+
+    if (!isResolved) {
+      items.push({
+        label: "Resolve & Close Ticket",
+        icon: "fas fa-check-circle",
+        iconColor: "var(--success)",
+        action: `openResolveTicketModal('${ticketId}')`,
+        badge: "Action",
+        badgeClass: "badge-active"
+      });
+    } else {
+      items.push({
+        label: "Update Resolution Notes",
+        icon: "fas fa-edit",
+        iconColor: "var(--warning)",
+        action: `openResolveTicketModal('${ticketId}')`
+      });
+    }
+
+    items.push({
+      label: "Schedule / Check-in Site Visit",
+      icon: "fas fa-map-marker-alt",
+      iconColor: "#0284c7",
+      action: `scheduleTicketSiteVisit('${ticketId}')`
+    });
+
+    items.push({ divider: true });
+
+    items.push({
+      label: "Share WhatsApp / Email Update",
+      icon: "fas fa-paper-plane",
+      iconColor: "#25D366",
+      action: `sendTicketComms('${ticketId}')`
+    });
+
+    if (hasFile) {
+      items.push({
+        label: "View Attached Photo / Document",
+        icon: "fas fa-paperclip",
+        iconColor: "#8b5cf6",
+        action: `openAttachmentViewer('TICKET', '${ticketId}')`
+      });
+    }
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openServiceActionMenu = openServiceActionMenu;
 
   /**
    * 2. CUSTOMER COMPLAINT BOOKING MODAL (WITH SEARCHABLE CLIENT PICKER)
@@ -11196,45 +11636,69 @@ window.sendTicketComms = typeof sendTicketComms !== 'undefined' ? sendTicketComm
           </td>
 
           
-          <td>
-            <div style="display: flex; gap: 4px; align-items: center;">
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openClientProfileModal('${c.Client_ID}')" title="360° Customer Ledger & Profile">
-                <i class="fas fa-eye"></i>
-              </button>
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openClientModal('${c.Client_ID}')" title="Edit Client Account">
-                <i class="fas fa-edit"></i>
-              </button>
-
-              
-              ${!state.activeVisit ? `
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openNewVisitModal('${c.Client_ID}')" title="Check-In at Client Site" style="color: var(--primary);">
-                  <i class="fas fa-map-marker-alt"></i>
-                </button>
-              ` : ''}
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openNewOrderModal('${c.Client_ID}')" title="Book Order for this Client">
-                <i class="fas fa-shopping-cart"></i>
-              </button>
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openNewPaymentModal('${c.Client_ID}')" title="Collect Payment">
-                <i class="fas fa-wallet"></i>
-              </button>
-
-              
-              <button type="button" class="btn btn-secondary btn-sm" onclick="sendClientComms('${c.Client_ID}')" title="Share Ledger / Balance Reminder via WhatsApp / Email">
-                <i class="fas fa-paper-plane"></i>
-              </button>
-            </div>
+          <td style="white-space: nowrap;">
+            <button type="button" class="action-dropdown-btn" onclick="openClientActionMenu(this, '${c.Client_ID}', ${!state.activeVisit}, event)" title="Click to view client actions">
+              <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+              <span>Actions</span>
+              <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+            </button>
           </td>
         </tr>
       `;
     }).join('');
   }
+
+  function openClientActionMenu(btn, clientId, canCheckIn, e) {
+    const items = [
+      {
+        label: "360° Customer Ledger & Profile",
+        icon: "fas fa-id-card",
+        iconColor: "var(--primary)",
+        action: `openClientProfileModal('${clientId}')`
+      },
+      {
+        label: "Edit Client Account",
+        icon: "fas fa-edit",
+        iconColor: "var(--warning)",
+        action: `openClientModal('${clientId}')`
+      }
+    ];
+
+    if (canCheckIn) {
+      items.push({
+        label: "Check-In at Client Site",
+        icon: "fas fa-map-marker-alt",
+        iconColor: "#ef4444",
+        action: `openNewVisitModal('${clientId}')`
+      });
+    }
+
+    items.push({ divider: true });
+
+    items.push({
+      label: "Book Sales Order",
+      icon: "fas fa-shopping-cart",
+      iconColor: "#0284c7",
+      action: `openNewOrderModal('${clientId}')`
+    });
+
+    items.push({
+      label: "Collect Payment",
+      icon: "fas fa-wallet",
+      iconColor: "var(--success)",
+      action: `openNewPaymentModal('${clientId}')`
+    });
+
+    items.push({
+      label: "Share Ledger / WhatsApp Reminder",
+      icon: "fas fa-paper-plane",
+      iconColor: "#25D366",
+      action: `sendClientComms('${clientId}')`
+    });
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openClientActionMenu = openClientActionMenu;
 
   /**
    * =========================================================================
@@ -14154,44 +14618,13 @@ window.openNewClientModal = window.openClientModal;
                     <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-main);">${u.Manager_Name || '-'}</div>
                   </td>
 
-                  <!-- 7. Action Button (Uniform 32x32px Square Buttons) -->
+                  <!-- 7. Action Button (Option 1: Actions Dropdown Menu) -->
                   <td style="text-align: right; white-space: nowrap;">
-                    <div style="display: inline-flex; align-items: center; gap: 6px;">
-                      
-                      <!-- 1. View 360° Profile -->
-                      <button class="btn btn-secondary btn-sm" onclick="openUserDetailsModal('${u.User_ID}')" title="View Full Employee Profile" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                        <i class="fas fa-eye"></i>
-                      </button>
-
-                      <!-- 2. Edit User Modal & CRUD -->
-                      ${isAdmin ? `
-                        <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.User_ID}')" title="Edit Employee Record & Granular CRUD" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--warning);">
-                          <i class="fas fa-edit"></i>
-                        </button>
-                      ` : ''}
-
-                      <!-- 3. Quick Facility Rights -->
-                      ${isAdmin ? `
-                        <button class="btn btn-secondary btn-sm" onclick="openUserFacilitiesModal('${u.User_ID}')" title="Manage Granular CRUD Permissions" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary);">
-                          <i class="fas fa-sliders-h"></i>
-                        </button>
-                      ` : ''}
-
-                      <!-- 4. Toggle Status (Active / Inactive) -->
-                      ${isAdmin && !isSelf ? `
-                        <button class="btn btn-secondary btn-sm" onclick="toggleUserStatus('${u.User_ID}')" title="${u.Status === 'ACTIVE' ? 'Deactivate User' : 'Activate User'}" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: ${u.Status === 'ACTIVE' ? 'var(--danger)' : 'var(--success)'};">
-                          <i class="fas ${u.Status === 'ACTIVE' ? 'fa-user-slash' : 'fa-user-check'}"></i>
-                        </button>
-                      ` : ''}
-
-                      <!-- 5. Delete Employee -->
-                      ${isAdmin && !isSelf ? `
-                        <button class="btn btn-danger btn-sm" onclick="deleteUserRecord('${u.User_ID}')" title="Delete Employee Account" style="width: 32px; height: 32px; min-width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">
-                          <i class="fas fa-trash"></i>
-                        </button>
-                      ` : ''}
-
-                    </div>
+                    <button type="button" class="action-dropdown-btn" onclick="openUserActionMenu(this, '${u.User_ID}', ${isAdmin ? 'true' : 'false'}, ${isSelf ? 'true' : 'false'}, '${u.Status || 'ACTIVE'}', event)" title="Click to view employee actions">
+                      <i class="fas fa-ellipsis-v" style="color: var(--primary);"></i>
+                      <span>Actions</span>
+                      <i class="fas fa-chevron-down action-dropdown-chevron"></i>
+                    </button>
                   </td>
                 </tr>
               `;
@@ -14201,6 +14634,58 @@ window.openNewClientModal = window.openClientModal;
       </div>
     `;
   }
+
+  function openUserActionMenu(btn, userId, isAdmin, isSelf, status, e) {
+    const items = [
+      {
+        label: "View 360° Staff Profile",
+        icon: "fas fa-eye",
+        iconColor: "var(--primary)",
+        action: `openUserDetailsModal('${userId}')`
+      }
+    ];
+
+    if (isAdmin) {
+      items.push({
+        label: "Edit Employee Record",
+        icon: "fas fa-edit",
+        iconColor: "var(--warning)",
+        action: `openEditUserModal('${userId}')`
+      });
+
+      items.push({
+        label: "Granular CRUD Permissions",
+        icon: "fas fa-sliders-h",
+        iconColor: "#0284c7",
+        action: `openUserFacilitiesModal('${userId}')`,
+        badge: "Matrix",
+        badgeClass: "badge-active"
+      });
+    }
+
+    if (isAdmin && !isSelf) {
+      items.push({ divider: true });
+
+      const isActive = (status || "ACTIVE") === "ACTIVE";
+      items.push({
+        label: isActive ? "Deactivate Account" : "Activate Account",
+        icon: isActive ? "fas fa-user-slash" : "fas fa-user-check",
+        iconColor: isActive ? "var(--warning)" : "var(--success)",
+        action: `toggleUserStatus('${userId}')`
+      });
+
+      items.push({
+        label: "Delete Employee Account",
+        icon: "fas fa-trash-alt",
+        iconColor: "#ef4444",
+        action: `deleteUserRecord('${userId}')`,
+        danger: true
+      });
+    }
+
+    openActionDropdown(btn, items, e);
+  }
+  window.openUserActionMenu = openUserActionMenu;
 
   window.clearUsersFilters = function() {
     window.usersSearchQuery = "";
