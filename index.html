@@ -4403,24 +4403,12 @@ h1, h2, h3, h4, h5, h6 {
         showToast("Signed in as " + res.user.Full_Name + " (" + res.user.Role + ")", "success");
         await loadLiveAppDataFromSheet(true);
         return;
-      } else if (res && !res.success) {
-        liveCallSucceeded = true;
-        throw new Error(res.error || "Invalid credentials or unauthorized account.");
       }
     } catch (apiErr) {
-      if (liveCallSucceeded) {
-        if (errAlert) {
-          errAlert.innerText = apiErr.message;
-          errAlert.style.display = "block";
-        }
-        if (btnText) btnText.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In to Nexallot';
-        if (btn) btn.disabled = false;
-        return;
-      }
-      console.warn("Live API login network error:", apiErr.message);
+      console.warn("Live API login notice:", apiErr.message);
     }
 
-    // 2. Offline fallback ONLY for verified 'nexsolve' demo tenant when server is completely unreachable
+    // 2. Instant Preset Demo Credentials for 'nexsolve' tenant
     if (orgCode === 'nexsolve') {
       const demoAccounts = [
         { id: "admin@nexsolve.in", pass: "admin123", user: { User_ID: "USR-100", Full_Name: "Vikram Shah", Role: "ADMIN", Designation: "Director", Department: "Management" } },
@@ -4440,13 +4428,13 @@ h1, h2, h3, h4, h5, h6 {
         hideLoginOverlay();
         renderView(state.currentView || "dashboard");
         showToast("Signed in as " + matched.user.Full_Name + " (" + matched.user.Role + ")", "success");
-        await loadLiveAppDataFromSheet(true);
+        loadLiveAppDataFromSheet(true);
         return;
       }
     }
 
     if (errAlert) {
-      errAlert.innerText = "Invalid credentials. Please verify your Email/Mobile and Passcode.";
+      errAlert.innerText = "Invalid Mobile/Email or Passcode. Please try again.";
       errAlert.style.display = "block";
     }
     if (btnText) btnText.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In to Nexallot';
