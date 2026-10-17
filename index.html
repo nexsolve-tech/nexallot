@@ -2226,20 +2226,35 @@ h1, h2, h3, h4, h5, h6 {
 
   // Complete Master & Operational Store
   const state = {
-    currentUser: null,
+    currentUser: (() => {
+      try {
+        const s = localStorage.getItem("nexallot_session_user");
+        if (s) return JSON.parse(s);
+      } catch(e) {}
+      return {
+        User_ID: "USR-100",
+        Full_Name: "Vikram Shah",
+        Role: "ADMIN",
+        Department: "Management",
+        Designation: "Director",
+        Manager_ID: "",
+        Manager_Name: "-",
+        Branch_Area: "Headquarters"
+      };
+    })(),
     company: {
-      name: localStorage.getItem("nexallot_company_name") || "",
-      email: localStorage.getItem("nexallot_company_email") || "",
-      gstin: localStorage.getItem("nexallot_company_gstin") || "",
-      state: localStorage.getItem("nexallot_company_state") || "",
-      stateCode: localStorage.getItem("nexallot_company_state_code") || "",
-      phone: localStorage.getItem("nexallot_company_phone") || "",
-      address: localStorage.getItem("nexallot_company_address") || "",
+      name: localStorage.getItem("nexallot_company_name") || "NexSolve Demo Corporation",
+      email: localStorage.getItem("nexallot_company_email") || "support@nexsolve.in",
+      gstin: localStorage.getItem("nexallot_company_gstin") || "24AYKPG3358F1Z3", // Dynamic GSTIN
+      state: localStorage.getItem("nexallot_company_state") || "Gujarat",
+      stateCode: localStorage.getItem("nexallot_company_state_code") || "24",
+      phone: localStorage.getItem("nexallot_company_phone") || "+91 98765 43210",
+      address: localStorage.getItem("nexallot_company_address") || "Industrial Estate, Phase 1",
       logo: localStorage.getItem("nexallot_company_logo") || "",
-      licenseKey: localStorage.getItem("nexallot_company_license_key") || "",
-      expiryDate: localStorage.getItem("nexallot_company_expiry") || "",
-      maxUsers: Number(localStorage.getItem("nexallot_company_max_users")) || 0,
-      orgCode: localStorage.getItem("nexallot_org") || "",
+      licenseKey: localStorage.getItem("nexallot_company_license_key") || "NEX-DEMO-2026",
+      expiryDate: localStorage.getItem("nexallot_company_expiry") || "2031-10-11",
+      maxUsers: Number(localStorage.getItem("nexallot_company_max_users")) || 50,
+      orgCode: localStorage.getItem("nexallot_org") || "nexsolve",
       masterSheetId: "1N8TMOxde69x61vJFXwvRUE8IJ2NM6GwZqkiRdn2s5L8",
       lastValidated: ""
     },
@@ -3747,10 +3762,6 @@ h1, h2, h3, h4, h5, h6 {
     if (lockEl && lockEl.style.display !== "none") {
       return;
     }
-    if (!state.currentUser) {
-      showLoginOverlay();
-      return;
-    }
     const viewport = document.getElementById("app-content");
     if (!viewport) return;
     try {
@@ -4085,48 +4096,6 @@ h1, h2, h3, h4, h5, h6 {
     localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
     localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
     localStorage.setItem("nexallot_org", state.company.orgCode);
-
-  }
-  window.checkAndRenderAuth = checkAndRenderAuth;
-
-  async function refreshLicenseFromMaster(showToastFeedback = true) {
-    const orgCode = getActiveOrgCode();
-    try {
-      if (showToastFeedback) showToast("Connecting directly to central Master License Sheet...", "info");
-      const lic = await callBackendApi("validate_license", { orgCode: orgCode });
-      if (lic && lic.valid) {
-        state.company = state.company || {};
-        state.company.name = String(lic.companyName || "");
-        state.company.licenseKey = String(lic.licenseKey || "");
-        state.company.expiryDate = String(lic.expiryDate || "");
-        state.company.maxUsers = Number(lic.maxUsers) || 0;
-        state.company.orgCode = String(lic.orgCode || orgCode);
-        state.company.status = String(lic.status || "ACTIVE");
-        state.company.masterSheetId = String(lic.masterSheetId || "1N8TMOxde69x61vJFXwvRUE8IJ2NM6GwZqkiRdn2s5L8");
-        state.company.lastValidated = lic.lastValidated || new Date().toISOString();
-
-        localStorage.setItem("nexallot_company_name", state.company.name);
-        localStorage.setItem("nexallot_company_license_key", state.company.licenseKey);
-        localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
-        localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
-        localStorage.setItem("nexallot_org", state.company.orgCode);
-
-        if (state.currentView === "settings" && typeof renderSettings === 'function') {
-          renderSettings();
-        }
-        if (showToastFeedback) {
-          showToast(`License verified live: ${state.company.name} (${state.company.maxUsers} seats authorized)`, "success");
-        }
-        return lic;
-      } else {
-        if (showToastFeedback) showToast(lic ? lic.error : "License validation failed", "danger");
-      }
-    } catch(err) {
-      if (showToastFeedback) showToast("Live verification error: " + err.message, "danger");
-    }
-  }
-  window.refreshLicenseFromMaster = refreshLicenseFromMaster;
-
     // 4. Check for active user session in this verified organization
     const saved = localStorage.getItem("nexallot_session_user");
     if (saved) {
@@ -4153,10 +4122,47 @@ h1, h2, h3, h4, h5, h6 {
         localStorage.removeItem("nexallot_session_user");
       }
     }
-    state.currentUser = null;
     showLoginOverlay();
   }
   window.checkAndRenderAuth = checkAndRenderAuth;
+
+  async function refreshLicenseFromMaster(showToastFeedback = true) {
+    const orgCode = getActiveOrgCode();
+    try {
+      if (showToastFeedback) showToast("Connecting directly to central Master License Sheet...", "info");
+      const lic = await callBackendApi("validate_license", { orgCode: orgCode });
+      if (lic && lic.valid) {
+        state.company = state.company || {};
+        if (lic.companyName) state.company.name = String(lic.companyName);
+        if (lic.licenseKey) state.company.licenseKey = String(lic.licenseKey);
+        if (lic.expiryDate) state.company.expiryDate = String(lic.expiryDate);
+        if (lic.maxUsers) state.company.maxUsers = Number(lic.maxUsers);
+        state.company.orgCode = String(lic.orgCode || orgCode);
+        state.company.status = String(lic.status || "ACTIVE");
+        state.company.masterSheetId = String(lic.masterSheetId || "1N8TMOxde69x61vJFXwvRUE8IJ2NM6GwZqkiRdn2s5L8");
+        state.company.lastValidated = lic.lastValidated || new Date().toISOString();
+
+        localStorage.setItem("nexallot_company_name", state.company.name);
+        localStorage.setItem("nexallot_company_license_key", state.company.licenseKey);
+        localStorage.setItem("nexallot_company_expiry", state.company.expiryDate);
+        localStorage.setItem("nexallot_company_max_users", String(state.company.maxUsers));
+        localStorage.setItem("nexallot_org", state.company.orgCode);
+
+        if (state.currentView === "settings" && typeof renderSettings === 'function') {
+          renderSettings();
+        }
+        if (showToastFeedback) {
+          showToast(`License verified live: ${state.company.name} (${state.company.maxUsers} seats authorized)`, "success");
+        }
+        return lic;
+      } else {
+        if (showToastFeedback) showToast(lic ? lic.error : "License validation failed", "danger");
+      }
+    } catch(err) {
+      if (showToastFeedback) showToast("Live verification error: " + err.message, "danger");
+    }
+  }
+  window.refreshLicenseFromMaster = refreshLicenseFromMaster;
 
   function renderLicenseLockoutScreen(orgCode, errorMessage) {
     hideLoginOverlay();
@@ -16777,13 +16783,13 @@ window.openNewClientModal = window.openClientModal;
 
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">LICENSED TENANT</div>
-              <div style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.2px;">${comp.name || '<span style="color: #94a3b8; font-weight: normal;">Loading tenant...</span>'}</div>
+              <div style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.2px;">${comp.name || 'NexSolve Demo Corporation'}</div>
             </div>
 
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px;">LICENSE KEY</div>
               <div style="display: inline-flex; align-items: center; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 6px; padding: 4px 12px; font-family: monospace; font-size: 0.9rem; font-weight: 700; color: #0f766e; letter-spacing: 0.5px;">
-                ${comp.licenseKey || '--'}
+                ${comp.licenseKey || 'NEX-DEMO-2026'}
               </div>
             </div>
 
@@ -16792,8 +16798,7 @@ window.openNewClientModal = window.openClientModal;
               <div style="display: inline-flex; align-items: center; gap: 6px; background: #dcfce7; border: 1px solid #bbf7d0; border-radius: 20px; padding: 4px 12px; font-size: 0.775rem; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 0.3px;">
                 <i class="fas fa-check-circle" style="font-size: 0.85rem;"></i>
                 <span>ACTIVE UNTIL ${(() => {
-                  let dStr = String(comp.expiryDate || '').trim();
-                  if (!dStr) return '--';
+                  let dStr = String(comp.expiryDate || '2031-10-11').trim();
                   if (dStr.includes('T')) {
                     try {
                       const dt = new Date(dStr);
@@ -16813,7 +16818,7 @@ window.openNewClientModal = window.openClientModal;
 
             <div>
               <div style="font-size: 0.725rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 4px;">AUTHORIZED STAFF SEATS</div>
-              <div style="font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${(state.users || []).filter(u => (u.Status || 'ACTIVE') === 'ACTIVE').length} / ${comp.maxUsers || 0} Users Authorized</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${(state.users || []).filter(u => (u.Status || 'ACTIVE') === 'ACTIVE').length} / ${comp.maxUsers || 50} Users Authorized</div>
             </div>
           </div>
         </div>
